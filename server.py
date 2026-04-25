@@ -334,8 +334,18 @@ def _merge_status(svc: dict) -> None:
     stale = pid_info["stale"]
 
     if pid_file is None:
-        # No pid tracking (e.g. systemd-managed) — port presence is the only signal
-        status = "running" if port_bound else "stopped"
+        # No pid tracking — check systemd first, then fall back to port presence
+        _unit_early = _systemd_unit(svc)
+        if _unit_early:
+            import subprocess as _sp
+
+            _rc = _sp.run(
+                ["systemctl", "is-active", "--quiet", _unit_early],
+                capture_output=True,
+            ).returncode
+            status = "running" if _rc == 0 else "stopped"
+        else:
+            status = "running" if port_bound else "stopped"
     elif alive and port_bound:
         status = "running"
     elif alive and not port_bound:
