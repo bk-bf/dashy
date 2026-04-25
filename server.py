@@ -154,25 +154,21 @@ def check_port(port: int | None) -> bool:
 
 
 def pids_on_port(port: int) -> list[int]:
-    """Return PIDs of processes listening on the given TCP port."""
+    """Return PIDs of processes listening on the given TCP port.
+
+    Uses `fuser` which reads /proc/net/tcp (world-readable) and works for
+    processes owned by any user — unlike `ss -p` which only shows own-user PIDs.
+    """
     try:
         out = subprocess.check_output(
-            ["ss", "-HtlnpO", f"sport = :{port}"],
+            ["fuser", f"{port}/tcp"],
             stderr=subprocess.DEVNULL,
             timeout=2,
             text=True,
         )
-        pids = []
-        for line in out.splitlines():
-            # ss output contains pid=NNNN in the users column
-            for part in line.split(","):
-                part = part.strip()
-                if part.startswith("pid="):
-                    try:
-                        pids.append(int(part[4:].rstrip(")")))
-                    except ValueError:
-                        pass
-        return list(set(pids))
+        return [int(p) for p in out.split() if p.strip().isdigit()]
+    except subprocess.CalledProcessError:
+        return []  # fuser exits 1 when nothing is on the port
     except Exception:
         return []
 
@@ -182,18 +178,9 @@ def action_clean(svc: dict) -> dict:
     sid = svc["id"]
     port = svc.get("port")
     pid_file = svc.get("pid_file")
-    killed = []
 
     if port:
-        for pid in pids_on_port(port):
-            if pid == os.getpid():
-                continue
-            try:
-                os.kill(pid, signal.SIGKILL)
-                killed.append(pid)
-                _log(sid, f"[dashy] cleaned up pid {pid} holding port {port}")
-            except Exception as e:
-                _log(sid, f"[dashy] could not kill pid {pid}: {e}")
+        _kill_port(sid, port)
 
     if pid_file:
         try:
@@ -201,9 +188,7 @@ def action_clean(svc: dict) -> dict:
         except FileNotFoundError:
             pass
 
-    if killed:
-        return {"ok": True, "message": f"killed {killed} and removed pid_file"}
-    return {"ok": True, "message": "nothing holding port; pid_file cleared"}
+    return {"ok": True, "message": "cleaned"}
 
 
 def get_uptime(pid: int) -> int | None:
@@ -291,15 +276,60 @@ def action_start(svc: dict) -> dict:
         return {"ok": False, "message": str(e)}
 
 
+def _kill_port(sid: str, port: int) -> bool:
+    """SIGTERM all PIDs on port, wait 3 s, SIGKILL survivors. Returns True if port freed."""
+    my_pid = os.getpid()
+    pids = [p for p in pids_on_port(port) if p != my_pid]
+    if not pids:
+        return True
+    _log(sid, f"[dashy] sending SIGTERM to pids {pids} on port {port}")
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    for _ in range(30):  # wait up to 3 s
+        time.sleep(0.1)
+        if not check_port(port):
+            _log(sid, "[dashy] stopped")
+            return True
+    survivors = [p for p in pids_on_port(port) if p != my_pid]
+    if survivors:
+        _log(sid, f"[dashy] escalating to SIGKILL for pids {survivors}")
+        for pid in survivors:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    return not check_port(port)
+
+
 def action_stop(svc: dict) -> dict:
+    """Stop a service.
+
+    Strategy (in order):
+    1. Run stop_cmd if defined (best-effort, async — e.g. systemctl, custom script).
+       After stop_cmd completes, fall through to port-kill if port is still bound.
+    2. Kill by port using fuser — works for any user, no pid_file required.
+    3. Clean up pid_file if present.
+
+    Port ownership is the ground truth. pid_file is only used for cleanup.
+    """
     sid = svc["id"]
     stop_cmd = svc.get("stop_cmd")
     pid_file = svc.get("pid_file")
+    port = svc.get("port")
 
-    if stop_cmd:
-        _log(sid, f"[dashy] stopping via stop_cmd: {stop_cmd}")
+    def _cleanup_pid_file():
+        if pid_file:
+            try:
+                os.remove(pid_file)
+            except FileNotFoundError:
+                pass
 
-        def _run_stop():
+    def _do_stop():
+        if stop_cmd:
+            _log(sid, f"[dashy] stop_cmd: {stop_cmd}")
             try:
                 proc = subprocess.run(
                     stop_cmd,
@@ -313,61 +343,20 @@ def action_stop(svc: dict) -> dict:
                     _log(sid, line)
                 if proc.returncode != 0:
                     _log(sid, f"[dashy] stop_cmd exited {proc.returncode}")
-                else:
-                    _log(sid, "[dashy] stopped")
             except subprocess.TimeoutExpired:
-                _log(sid, "[dashy] stop_cmd timed out after 15s")
+                _log(sid, "[dashy] stop_cmd timed out — falling back to port-kill")
             except Exception as e:
                 _log(sid, f"[dashy] stop_cmd error: {e}")
-            finally:
-                _refresh_status(sid)
 
-        threading.Thread(target=_run_stop, daemon=True).start()
-        return {"ok": True, "message": "stop_cmd dispatched"}
+        # Always attempt port-kill — handles externally-started and stop_cmd failures
+        if port and check_port(port):
+            _kill_port(sid, port)
 
-    pid_info = check_pid(pid_file)
-    if not pid_info["alive"]:
-        return {"ok": False, "message": "process not running"}
-    pid = pid_info["pid"]
-
-    # Safety: never signal our own process or process group
-    if pid == os.getpid():
-        return {"ok": False, "message": "cowardly refusing to kill dashy itself"}
-
-    try:
-        pgid = os.getpgid(pid)
-    except ProcessLookupError:
-        return {"ok": True, "message": "stopped"}
-
-    def _cleanup_pid_file():
-        if pid_file:
-            try:
-                os.remove(pid_file)
-            except FileNotFoundError:
-                pass
-
-    _log(sid, f"[dashy] stopping (pid {pid})")
-    try:
-        # SIGTERM to group leader only first — lets pnpm/npm clean up children
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(30):  # wait up to 3s for graceful exit
-            time.sleep(0.1)
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                _log(sid, "[dashy] stopped")
-                _cleanup_pid_file()
-                return {"ok": True, "message": "stopped"}
-        # Escalate: kill the whole process group
-        _log(sid, f"[dashy] escalating to SIGKILL for process group {pgid}")
-        os.killpg(pgid, signal.SIGKILL)
         _cleanup_pid_file()
-        return {"ok": True, "message": "killed"}
-    except ProcessLookupError:
-        _cleanup_pid_file()
-        return {"ok": True, "message": "stopped"}
-    except Exception as e:
-        return {"ok": False, "message": str(e)}
+        _refresh_status(sid)
+
+    threading.Thread(target=_do_stop, daemon=True).start()
+    return {"ok": True, "message": "stopping"}
 
 
 def action_restart(svc: dict) -> dict:
