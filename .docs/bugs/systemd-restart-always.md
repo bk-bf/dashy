@@ -78,3 +78,33 @@ Fix it there first before touching any dashy code.
 
 **UPDATE 2026-04-25:** Confirmed — direct `sudo systemctl stop openswarm-dashboard`
 returns `inactive` after 8s. The bug is in how dashy executes the stop_cmd, not systemd.
+
+**UPDATE 2026-04-25 (RESOLVED):** Root cause found. Nothing to do with dashy or
+`Restart=` at all.
+
+`hermes-gateway.service` has `Wants=openswarm-dashboard.service` in its unit:
+
+```ini
+[Unit]
+Wants=openswarm-dashboard.service
+```
+
+`Wants=` means systemd activates openswarm-dashboard whenever hermes-gateway is
+running. Stopping openswarm-dashboard alone will never stick as long as hermes-gateway
+is active — systemd sees the dependency unsatisfied and brings it back up.
+
+**Fix (in the openswarm repo):** Either remove `Wants=openswarm-dashboard.service`
+from `hermes-gateway.service`, or stop both together:
+
+```bash
+sudo systemctl stop hermes-gateway openswarm-dashboard
+```
+
+Dashy's stop button for openswarm-dashboard should use a stop_cmd that stops both:
+
+```json
+"stop_cmd": "sudo systemctl stop hermes-gateway openswarm-dashboard",
+"start_cmd": "sudo systemctl start openswarm-dashboard hermes-gateway"
+```
+
+Dashy code is correct and requires no further changes for this issue.
