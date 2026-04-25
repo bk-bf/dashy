@@ -50,10 +50,14 @@ echo "==> Installing dashy..."
 systemctl disable dev-dashboard 2>/dev/null || true
 rm -f /etc/systemd/system/dev-dashboard.service
 
-# sudoers: allow dashy user to kill processes on any port via fuser (cross-user)
+# sudoers: allow dashy user to kill ports and stop systemd units
 cat > "$SUDOERS_FILE" <<EOF
-# dashy: allow service user to kill processes on any port (cross-user stop)
+# dashy: cross-user port kill
 ${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/fuser
+# dashy: stop/start systemd units (for services managed by systemd)
+${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop *
+${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start *
+${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart *
 EOF
 chmod 0440 "$SUDOERS_FILE"
 visudo -cf "$SUDOERS_FILE"
