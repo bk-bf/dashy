@@ -190,6 +190,7 @@ select.hdr-select option { background: #1a1c22; }
 .act-btn.restart:hover{ color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
 .act-btn.open:hover   { color: var(--blue);  border-color: var(--blue);  background: var(--blue-bg); }
 .act-btn.clean:hover  { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
+.act-btn:disabled { opacity: 0.25; cursor: not-allowed; pointer-events: none; }
 .act-btn.policy-always  { color: var(--amber); border-color: var(--amber); }
 .act-btn.policy-always:hover { background: var(--amber-bg); }
 .act-btn.policy-onfail  { color: var(--green); border-color: var(--green); }
@@ -544,6 +545,8 @@ function renderRow(svc) {
   const tip   = { 'always': 'Restart=always — click → on-failure', 'on-failure': 'Restart=on-failure — click → never', 'no': 'Restart=no — click → always' };
   const next = cycle[pol] || 'on-failure';
   const restartPolicyBtn = `<button class="act-btn ${cls[pol] || 'policy-no'}" onclick="setRestartPolicy('${sid}','${next}')" title="${tip[pol] || ''}">${label[pol] || '↺ ?'}</button>`;
+  const isAlwaysOn = pol === 'always';
+  const disabledAttr = isAlwaysOn ? ' disabled title="Restart=always — stop will not stick"' : '';
   return `<tr onclick="openLogPanel('${sid}')" id="row-${sid}">
   <td class="col-name"   title="${escHtml(svc.name)}">${escHtml(svc.name)}${warnIcon}</td>
   <td class="col-port">${svc.port ? escHtml(String(svc.port)) : '—'}</td>
@@ -552,8 +555,8 @@ function renderRow(svc) {
   <td class="col-uptime">${fmtUptime(svc.uptime_sec)}</td>
   <td class="col-actions" onclick="event.stopPropagation()">
     <div class="row-actions">
-      <button class="act-btn start"   onclick="doAction('${sid}','start')"            title="Start">▶</button>
-      <button class="act-btn stop"    onclick="confirmAction('${sid}','stop')"         title="Stop">■</button>
+      <button class="act-btn start"   onclick="doAction('${sid}','start')"       ${disabledAttr}>▶</button>
+      <button class="act-btn stop"    onclick="confirmAction('${sid}','stop')"   ${disabledAttr}>■</button>
       <button class="act-btn restart" onclick="confirmAction('${sid}','restart')"      title="Restart">↺</button>
       ${openBtn}${cleanBtn}${restartPolicyBtn}
     </div>
