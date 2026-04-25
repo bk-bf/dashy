@@ -55,6 +55,7 @@ Rules:
 - `start_cmd` is a fully self-contained shell string; scripts source their own `.env`.
 - `worktree` omit or `null` for the main branch of a project.
 - `pid_file` may not exist yet (stopped state).
+- `log_file` (optional) — absolute path to a log file; shown in the log panel for externally-started services.
 
 ## Adding a project to the dashboard
 
@@ -85,7 +86,7 @@ systemctl status dashy
 | POST   | `/api/services/{id}/start`   | Start a service                                     |
 | POST   | `/api/services/{id}/stop`    | Stop a service                                      |
 | POST   | `/api/services/{id}/restart` | Restart a service                                   |
-| GET    | `/api/services/{id}/log`     | Last 200 lines of start/stop output                 |
+| GET    | `/api/services/{id}/log`     | Last 200 lines of output; falls back to `log_file` if dashy didn't start the process |
 | GET    | `/api/events`                | SSE — pushes `services.updated` every scan interval |
 | GET    | `/api/config`                | Return parsed config.json                           |
 | POST   | `/api/config/scan_roots`     | Add/remove a scan root at runtime                   |

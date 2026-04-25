@@ -81,7 +81,7 @@ select.hdr-select option { background: #1a1c22; }
   flex-shrink: 0;
 }
 .icon-btn:hover { color: var(--text); border-color: var(--muted); background: var(--surface); }
-.icon-btn.active { color: var(--blue); border-color: var(--blue); background: var(--blue-bg); }
+.icon-btn.danger:hover { color: var(--red); border-color: var(--red); background: var(--red-bg); }
 
 .live-indicator { display: flex; align-items: center; gap: 5px; }
 .live-label { font-size: 10px; letter-spacing: .06em; color: var(--muted); }
@@ -108,7 +108,7 @@ select.hdr-select option { background: #1a1c22; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 20px 9px;
+  padding: 8px 20px 8px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -118,9 +118,10 @@ select.hdr-select option { background: #1a1c22; }
 .section-project { font-size: 11px; font-weight: 700; letter-spacing: .07em; color: var(--text); text-transform: uppercase; }
 .section-meta { font-size: 10px; color: var(--muted); }
 .section-running { color: var(--green); font-weight: 700; }
+.section-batch { display: flex; gap: 5px; margin-left: auto; }
 
 /* ── service table ── */
-.service-table { width: 100%; border-collapse: collapse; }
+.service-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .service-table thead th {
   padding: 6px 16px;
   text-align: left;
@@ -138,7 +139,6 @@ select.hdr-select option { background: #1a1c22; }
   transition: background .1s;
 }
 .service-table tbody tr:hover { background: var(--surface); }
-.service-table tbody tr:hover .row-actions { opacity: 1; }
 .service-table tbody tr:last-child { border-bottom: none; }
 .service-table td {
   padding: 9px 16px;
@@ -146,14 +146,14 @@ select.hdr-select option { background: #1a1c22; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 240px;
+  max-width: none;
 }
-.col-name   { color: var(--text); font-weight: 600; max-width: 220px; }
-.col-port   { color: var(--dim); width: 80px; }
-.col-status { width: 110px; }
-.col-wt     { color: var(--dim); max-width: 180px; }
-.col-uptime { color: var(--dim); width: 100px; }
-.col-actions{ width: 120px; }
+.col-name   { color: var(--text); font-weight: 600; }
+.col-port   { color: var(--dim); }
+.col-status { }
+.col-wt     { color: var(--dim); }
+.col-uptime { color: var(--dim); }
+.col-actions{ }
 
 /* ── status badge ── */
 .badge {
@@ -166,26 +166,47 @@ select.hdr-select option { background: #1a1c22; }
 }
 .badge-running  { background: var(--green-bg);  color: var(--green); }
 .badge-starting { background: var(--amber-bg);  color: var(--amber); }
+.badge-stopping { background: var(--amber-bg);  color: var(--amber); }
 .badge-stopped  { background: #1e2028;          color: var(--muted); }
 .badge-zombie   { background: var(--red-bg);    color: var(--red);   }
 .badge-error    { background: var(--red-bg);    color: var(--red);   }
 
 /* ── row action buttons ── */
-.row-actions { opacity: 0; display: flex; gap: 6px; transition: opacity .12s; }
+.row-actions { display: flex; gap: 5px; }
 .act-btn {
   background: none;
   border: 1px solid var(--border);
   color: var(--muted);
   font-family: inherit;
   font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: color .1s, border-color .1s, background .1s;
+}
+.act-btn:hover        { color: var(--text);  border-color: var(--muted); background: var(--surface); }
+.act-btn.start:hover  { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.act-btn.stop:hover   { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
+.act-btn.restart:hover{ color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+.act-btn.open:hover   { color: var(--blue);  border-color: var(--blue);  background: var(--blue-bg); }
+.act-btn.clean:hover  { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
+
+/* ── batch buttons (section header) ── */
+.batch-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: .03em;
   padding: 2px 8px;
   cursor: pointer;
   transition: color .1s, border-color .1s, background .1s;
 }
-.act-btn:hover { color: var(--text); border-color: var(--muted); background: var(--surface); }
-.act-btn.start:hover  { color: var(--green); border-color: var(--green); background: var(--green-bg); }
-.act-btn.stop:hover   { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
-.act-btn.restart:hover{ color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+.batch-btn:hover          { color: var(--text);  border-color: var(--muted); background: #1e2028; }
+.batch-btn.start:hover    { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.batch-btn.stop:hover     { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
+.batch-btn.open:hover     { color: var(--blue);  border-color: var(--blue);  background: var(--blue-bg);  }
+.batch-btn.clean:hover    { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
 
 /* ── empty state ── */
 .empty-state {
@@ -288,6 +309,7 @@ select.hdr-select option { background: #1a1c22; }
       <option value="30">refresh: 30s</option>
       <option value="0">refresh: off</option>
      </select>
+    <button class="icon-btn danger" onclick="cleanAllZombies()" title="Kill all zombie/error processes">✕ clean zombies</button>
     <div class="header-meta">
       <div class="live-indicator">
         <div class="live-dot" id="live-dot"></div>
@@ -296,11 +318,10 @@ select.hdr-select option { background: #1a1c22; }
     </div>
   </header>
 
-  <div id="content">
-    <div class="empty-state" id="empty-state" style="display:none">
-      No services found. Add a <code>dashy.json</code> to a project under a scan root,<br>
-      or add a new scan root with <code>+ scan root</code>.
-    </div>
+  <div id="content"></div>
+  <div class="empty-state" id="empty-state" style="display:none">
+    No services found. Add a <code>dashy.json</code> to a project under a scan root,<br>
+    or add a new scan root with <code>+ scan root</code>.
   </div>
 
 </div>
@@ -376,7 +397,7 @@ async function fetchServices() {
     services = await r.json();
     render();
     pulseDot();
-    setLive('amber'); // polling, not SSE
+    if (!evtSource) setLive('amber');
   } catch {
     setLive('red');
   }
@@ -454,20 +475,35 @@ function render() {
   let html = '';
   for (const [project, svcs] of Object.entries(groups)) {
     if (filter && project !== filter) continue;
-    const runCount = svcs.filter(s => s.status === 'running').length;
-    const runHtml  = runCount > 0 ? `<span class="section-running">${runCount} running</span>` : '';
-    const wtCount  = new Set(svcs.map(s => s.worktree).filter(Boolean)).size;
-    const metaParts = [];
+    const runCount   = svcs.filter(s => s.status === 'running').length;
+    const runHtml    = runCount > 0 ? `<span class="section-running">${runCount} running</span>` : '';
+    const wtCount    = new Set(svcs.map(s => s.worktree).filter(Boolean)).size;
+    const metaParts  = [];
     if (wtCount) metaParts.push(`${wtCount} worktree${wtCount>1?'s':''}`);
     metaParts.push(`${svcs.length} service${svcs.length>1?'s':''}`);
+    const ep = escHtml(project);
 
-    html += `<div class="project-section" id="section-${escHtml(project)}">
+    html += `<div class="project-section" id="section-${ep}">
   <div class="section-header">
-    <span class="section-project">${escHtml(project)}</span>
+    <span class="section-project">${ep}</span>
     <span class="section-meta">${metaParts.join(' · ')}</span>
     ${runHtml}
+    <div class="section-batch">
+      <button class="batch-btn start" onclick="batchAction('${ep}','start')"   title="Start all stopped">▶ start all</button>
+      <button class="batch-btn stop"  onclick="batchAction('${ep}','stop')"    title="Stop all running">■ stop all</button>
+      <button class="batch-btn open"  onclick="batchOpen('${ep}')"             title="Open all in new tabs">↗ open all</button>
+      <button class="batch-btn clean" onclick="batchAction('${ep}','clean')"   title="Clean all zombie/error">✕ clean</button>
+    </div>
   </div>
   <table class="service-table">
+    <colgroup>
+      <col style="width:30%">
+      <col style="width:9%">
+      <col style="width:12%">
+      <col style="width:20%">
+      <col style="width:9%">
+      <col style="width:20%">
+    </colgroup>
     <thead><tr>
       <th>Name</th><th>Port</th><th>Status</th><th>Worktree</th><th>Uptime</th><th>Actions</th>
     </tr></thead>
@@ -483,17 +519,24 @@ function render() {
 
 function renderRow(svc) {
   const sid = escHtml(svc.id);
+  const openBtn  = svc.port
+    ? `<button class="act-btn open"  onclick="window.open('http://'+window.location.hostname+':${svc.port}','_blank')" title="Open in new tab">↗</button>`
+    : '';
+  const cleanBtn = (svc.status === 'zombie' || svc.status === 'error')
+    ? `<button class="act-btn clean" onclick="doAction('${sid}','clean')" title="Clean zombie">✕</button>`
+    : '';
   return `<tr onclick="openLogPanel('${sid}')" id="row-${sid}">
-  <td class="col-name" title="${escHtml(svc.name)}">${escHtml(svc.name)}</td>
+  <td class="col-name"   title="${escHtml(svc.name)}">${escHtml(svc.name)}</td>
   <td class="col-port">${svc.port ? escHtml(String(svc.port)) : '—'}</td>
   <td class="col-status">${statusBadge(svc.status || 'stopped')}</td>
-  <td class="col-wt" title="${escHtml(svc.worktree||'')}">${svc.worktree ? escHtml(svc.worktree) : '<span style="color:var(--muted)">main</span>'}</td>
+  <td class="col-wt"     title="${escHtml(svc.worktree||'')}">${svc.worktree ? escHtml(svc.worktree) : '<span style="color:var(--muted)">main</span>'}</td>
   <td class="col-uptime">${fmtUptime(svc.uptime_sec)}</td>
   <td class="col-actions" onclick="event.stopPropagation()">
     <div class="row-actions">
-      <button class="act-btn start"   onclick="doAction('${sid}','start')"   title="Start">▶</button>
-      <button class="act-btn stop"    onclick="confirmAction('${sid}','stop')"    title="Stop">■</button>
-      <button class="act-btn restart" onclick="confirmAction('${sid}','restart')" title="Restart">↺</button>
+      <button class="act-btn start"   onclick="doAction('${sid}','start')"            title="Start">▶</button>
+      <button class="act-btn stop"    onclick="confirmAction('${sid}','stop')"         title="Stop">■</button>
+      <button class="act-btn restart" onclick="confirmAction('${sid}','restart')"      title="Restart">↺</button>
+      ${openBtn}${cleanBtn}
     </div>
   </td>
 </tr>`;
@@ -532,11 +575,33 @@ document.getElementById('modal-confirm-btn').addEventListener('click', () => {
 async function doAction(id, action) {
   try {
     await fetch(`/api/services/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
-    // Refresh after a short delay to pick up status change
-    setTimeout(fetchServices, 800);
   } catch (e) {
     console.error('action failed', e);
   }
+}
+
+// ── Batch actions ─────────────────────────────────────────────────────────────
+function batchAction(project, action) {
+  const targets = services.filter(s => {
+    if (s.project !== project) return false;
+    if (action === 'start') return s.status === 'stopped' || s.status === 'error';
+    if (action === 'stop')  return s.status === 'running' || s.status === 'starting';
+    if (action === 'clean') return s.status === 'zombie'  || s.status === 'error';
+    return true;
+  });
+  targets.forEach(s => doAction(s.id, action));
+}
+
+function batchOpen(project) {
+  services
+    .filter(s => s.project === project && s.port)
+    .forEach(s => window.open('http://' + window.location.hostname + ':' + s.port, '_blank'));
+}
+
+function cleanAllZombies() {
+  services
+    .filter(s => s.status === 'zombie' || s.status === 'error')
+    .forEach(s => doAction(s.id, 'clean'));
 }
 
 // ── Log panel ─────────────────────────────────────────────────────────────────
@@ -546,7 +611,6 @@ async function openLogPanel(id) {
   document.getElementById('log-panel-title').textContent = svc ? svc.name : id;
   document.getElementById('log-panel').classList.add('open');
 
-  // Position panel
   const hdrH = document.querySelector('header').offsetHeight;
   if (logPanelTop === null) logPanelTop = Math.max(hdrH, window.innerHeight * 0.55);
   document.getElementById('log-panel').style.top = logPanelTop + 'px';

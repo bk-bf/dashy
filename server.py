@@ -8,7 +8,7 @@ import signal
 import subprocess
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -153,6 +153,59 @@ def check_port(port: int | None) -> bool:
         return False
 
 
+def pids_on_port(port: int) -> list[int]:
+    """Return PIDs of processes listening on the given TCP port."""
+    try:
+        out = subprocess.check_output(
+            ["ss", "-HtlnpO", f"sport = :{port}"],
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            text=True,
+        )
+        pids = []
+        for line in out.splitlines():
+            # ss output contains pid=NNNN in the users column
+            for part in line.split(","):
+                part = part.strip()
+                if part.startswith("pid="):
+                    try:
+                        pids.append(int(part[4:].rstrip(")")))
+                    except ValueError:
+                        pass
+        return list(set(pids))
+    except Exception:
+        return []
+
+
+def action_clean(svc: dict) -> dict:
+    """Kill any process holding the service's port and remove stale pid_file."""
+    sid = svc["id"]
+    port = svc.get("port")
+    pid_file = svc.get("pid_file")
+    killed = []
+
+    if port:
+        for pid in pids_on_port(port):
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed.append(pid)
+                _log(sid, f"[dashy] cleaned up pid {pid} holding port {port}")
+            except Exception as e:
+                _log(sid, f"[dashy] could not kill pid {pid}: {e}")
+
+    if pid_file:
+        try:
+            os.remove(pid_file)
+        except FileNotFoundError:
+            pass
+
+    if killed:
+        return {"ok": True, "message": f"killed {killed} and removed pid_file"}
+    return {"ok": True, "message": "nothing holding port; pid_file cleared"}
+
+
 def get_uptime(pid: int) -> int | None:
     try:
         with open(f"/proc/{pid}/stat") as f:
@@ -166,13 +219,17 @@ def get_uptime(pid: int) -> int | None:
 
 
 def _merge_status(svc: dict) -> None:
-    pid_info = check_pid(svc.get("pid_file"))
+    pid_file = svc.get("pid_file")
+    pid_info = check_pid(pid_file)
     port_bound = check_port(svc.get("port"))
     pid = pid_info["pid"]
     alive = pid_info["alive"]
     stale = pid_info["stale"]
 
-    if alive and port_bound:
+    if pid_file is None:
+        # No pid tracking (e.g. systemd-managed) — port presence is the only signal
+        status = "running" if port_bound else "stopped"
+    elif alive and port_bound:
         status = "running"
     elif alive and not port_bound:
         status = "starting"
@@ -214,6 +271,8 @@ def action_start(svc: dict) -> dict:
     cwd = svc.get("cwd")
     if not start_cmd:
         return {"ok": False, "message": "no start_cmd defined"}
+    with _logs_lock:
+        _logs[sid] = collections.deque(maxlen=LOG_MAXLINES)
     _log(sid, f"[dashy] starting: {start_cmd}")
     try:
         proc = subprocess.Popen(
@@ -223,6 +282,7 @@ def action_start(svc: dict) -> dict:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            preexec_fn=os.setsid,  # new process group — isolates from dashy
         )
         t = threading.Thread(target=_stream_output, args=(sid, proc), daemon=True)
         t.start()
@@ -250,20 +310,42 @@ def action_stop(svc: dict) -> dict:
     if not pid_info["alive"]:
         return {"ok": False, "message": "process not running"}
     pid = pid_info["pid"]
-    _log(sid, f"[dashy] sending SIGTERM to pid {pid}")
+
+    # Safety: never signal our own process or process group
+    if pid == os.getpid():
+        return {"ok": False, "message": "cowardly refusing to kill dashy itself"}
+
     try:
+        pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        return {"ok": True, "message": "stopped"}
+
+    def _cleanup_pid_file():
+        if pid_file:
+            try:
+                os.remove(pid_file)
+            except FileNotFoundError:
+                pass
+
+    _log(sid, f"[dashy] stopping (pid {pid})")
+    try:
+        # SIGTERM to group leader only first — lets pnpm/npm clean up children
         os.kill(pid, signal.SIGTERM)
-        for _ in range(50):  # wait up to 5s
+        for _ in range(30):  # wait up to 3s for graceful exit
             time.sleep(0.1)
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
-                _log(sid, "[dashy] process exited")
+                _log(sid, "[dashy] stopped")
+                _cleanup_pid_file()
                 return {"ok": True, "message": "stopped"}
-        _log(sid, f"[dashy] pid {pid} still alive after 5s, sending SIGKILL")
-        os.kill(pid, signal.SIGKILL)
+        # Escalate: kill the whole process group
+        _log(sid, f"[dashy] escalating to SIGKILL for process group {pgid}")
+        os.killpg(pgid, signal.SIGKILL)
+        _cleanup_pid_file()
         return {"ok": True, "message": "killed"}
     except ProcessLookupError:
+        _cleanup_pid_file()
         return {"ok": True, "message": "stopped"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -279,6 +361,18 @@ def action_restart(svc: dict) -> dict:
 # ---------------------------------------------------------------------------
 # SSE
 # ---------------------------------------------------------------------------
+
+
+def _refresh_status(sid: str) -> None:
+    """Re-check status for one service and broadcast to SSE clients."""
+    with _registry_lock:
+        svc = _registry.get(sid)
+    if svc is None:
+        return
+    _merge_status(svc)
+    with _registry_lock:
+        _registry[sid] = svc
+    _sse_broadcast()
 
 
 def _sse_broadcast() -> None:
@@ -348,6 +442,20 @@ class Handler(BaseHTTPRequestHandler):
             sid = parts[2]
             with _logs_lock:
                 lines = list(_logs.get(sid, []))
+            # If the ring buffer is empty, fall back to log_file declared in dashy.json
+            if not lines:
+                with _registry_lock:
+                    svc = _registry.get(sid, {})
+                log_file = svc.get("log_file")
+                if log_file:
+                    try:
+                        with open(log_file) as f:
+                            all_lines = f.read().splitlines()
+                        lines = all_lines[-LOG_MAXLINES:]
+                    except Exception as e:
+                        lines = [f"[dashy] could not read log_file: {e}"]
+                else:
+                    lines = []
             self.send_json({"lines": lines})
 
         elif path == "/api/config":
@@ -409,6 +517,7 @@ class Handler(BaseHTTPRequestHandler):
                             "pid_file",
                             "stop_cmd",
                             "worktree",
+                            "log_file",
                         ],
                         "id_convention": "<project>-<worktree>-<role>  (omit worktree segment for main branch)",
                         "stop_cmd_null": "dashy kills via pid_file: SIGTERM → 5s → SIGKILL",
@@ -473,11 +582,29 @@ class Handler(BaseHTTPRequestHandler):
                     {"ok": False, "message": "service not found"}, 404
                 )
             if action == "start":
-                return self.send_json(action_start(svc))
+                result = action_start(svc)
+                threading.Thread(
+                    target=lambda: (time.sleep(1.5), _refresh_status(sid)), daemon=True
+                ).start()
+                return self.send_json(result)
             elif action == "stop":
-                return self.send_json(action_stop(svc))
+                result = action_stop(svc)
+                threading.Thread(
+                    target=lambda: _refresh_status(sid), daemon=True
+                ).start()
+                return self.send_json(result)
             elif action == "restart":
-                return self.send_json(action_restart(svc))
+                result = action_restart(svc)
+                threading.Thread(
+                    target=lambda: (time.sleep(1.5), _refresh_status(sid)), daemon=True
+                ).start()
+                return self.send_json(result)
+            elif action == "clean":
+                result = action_clean(svc)
+                threading.Thread(
+                    target=lambda: _refresh_status(sid), daemon=True
+                ).start()
+                return self.send_json(result)
             else:
                 return self.send_error(404)
 
@@ -594,6 +721,6 @@ if __name__ == "__main__":
     t = threading.Thread(target=refresh_services, daemon=True)
     t.start()
 
-    server = HTTPServer(("", port), Handler)
+    server = ThreadingHTTPServer(("", port), Handler)
     print(f"dashy listening on http://localhost:{port}/")
     server.serve_forever()

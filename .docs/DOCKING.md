@@ -102,6 +102,9 @@ curl -s -X POST http://localhost:7800/api/config/scan_roots \
 | `services[].port` | no | Used for liveness checks. Omit if the service doesn't bind a port. |
 | `services[].pid_file` | no | Absolute path. Written by `start_cmd`; may not exist yet (stopped state). Required if `stop_cmd` is null. |
 | `services[].stop_cmd` | no | Shell string. `null` → dashy kills via `pid_file` (SIGTERM → 5 s → SIGKILL). |
+| `services[].log_file` | no | Absolute path to a log file. Shown in the dashboard log panel when the process was **not** started by dashy (e.g. systemd-managed or externally started). dashy reads the last 200 lines. Ignored if dashy holds an in-memory ring buffer for the process. |
+
+> **Network binding**: dashy's status check only tests whether the port is bound — it does not distinguish `127.0.0.1` from `0.0.0.0`. If the service needs to be reachable from outside localhost (e.g. over Tailscale), ensure `start_cmd` launches the server bound to `0.0.0.0` or the appropriate interface. For vite: set `host: '0.0.0.0'` and `allowedHosts: ['your-hostname']` in `vite.config.ts`, or pass `--host` on the command line.
 
 ### Multi-service example (API + worker pair)
 
