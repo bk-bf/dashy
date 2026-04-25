@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── sudoers: allow dashy (runs as ubuntu) to kill any port via fuser ──────────
 SUDOERS_FILE=/etc/sudoers.d/dashy
 cat > "$SUDOERS_FILE" <<'EOF'
-# Allow dashy service (ubuntu user) to kill processes on any port
-ubuntu ALL=(root) NOPASSWD: /usr/bin/fuser
+# Allow dashy service (runs as agent) to kill processes on any port
+agent ALL=(root) NOPASSWD: /usr/bin/fuser
 EOF
 chmod 0440 "$SUDOERS_FILE"
 visudo -cf "$SUDOERS_FILE"  # validate — aborts if syntax error
