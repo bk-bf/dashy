@@ -12,17 +12,22 @@ SERVICE_FILE=/etc/systemd/system/${SERVICE_NAME}.service
 SUDOERS_FILE=/etc/sudoers.d/${SERVICE_NAME}
 PORT=7800
 
-# ── must run as root ──────────────────────────────────────────────────────────
+# ── must run as root via sudo ─────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
   echo "error: run as root — sudo bash $0 $*"
   exit 1
 fi
 
+# The user who invoked sudo — dashy will run as this user and start services as them
+DASHY_USER="${SUDO_USER:-ubuntu}"
+DASHY_HOME="$(getent passwd "$DASHY_USER" | cut -d: -f6)"
+echo "==> dashy will run as: $DASHY_USER"
+
 # ── uninstall ─────────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--uninstall" ]]; then
   echo "==> Uninstalling dashy..."
 
-  systemctl stop  ${SERVICE_NAME} 2>/dev/null || true
+  systemctl stop    ${SERVICE_NAME} 2>/dev/null || true
   systemctl disable ${SERVICE_NAME} 2>/dev/null || true
   rm -f "$SERVICE_FILE"
   systemctl daemon-reload
@@ -45,21 +50,21 @@ echo "==> Installing dashy..."
 systemctl disable dev-dashboard 2>/dev/null || true
 rm -f /etc/systemd/system/dev-dashboard.service
 
-# sudoers: allow dashy (runs as agent) to kill processes on any port via fuser
-cat > "$SUDOERS_FILE" <<'EOF'
+# sudoers: allow dashy user to kill processes on any port via fuser (cross-user)
+cat > "$SUDOERS_FILE" <<EOF
 # dashy: allow service user to kill processes on any port (cross-user stop)
-agent ALL=(root) NOPASSWD: /usr/bin/fuser
+${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/fuser
 EOF
 chmod 0440 "$SUDOERS_FILE"
 visudo -cf "$SUDOERS_FILE"
-echo "    sudoers rule written: $SUDOERS_FILE"
+echo "    sudoers rule written: $SUDOERS_FILE (user: $DASHY_USER)"
 
-# systemd unit
-cp "$SCRIPT_DIR/${SERVICE_NAME}.service" "$SERVICE_FILE"
+# systemd unit — patch User= to the installing user
+sed "s|^User=.*|User=${DASHY_USER}|" "$SCRIPT_DIR/${SERVICE_NAME}.service" > "$SERVICE_FILE"
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 systemctl restart ${SERVICE_NAME}
-echo "    systemd unit installed and started"
+echo "    systemd unit installed (User=${DASHY_USER})"
 
 # health check
 echo "==> Waiting for dashy to respond..."
