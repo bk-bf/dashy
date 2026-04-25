@@ -277,31 +277,27 @@ def action_start(svc: dict) -> dict:
 
 
 def _kill_port(sid: str, port: int) -> bool:
-    """SIGTERM all PIDs on port, wait 3 s, SIGKILL survivors. Returns True if port freed."""
-    my_pid = os.getpid()
-    pids = [p for p in pids_on_port(port) if p != my_pid]
-    if not pids:
+    """Kill all processes on port via 'sudo fuser -k', works for any owning user."""
+    if not check_port(port):
         return True
-    _log(sid, f"[dashy] sending SIGTERM to pids {pids} on port {port}")
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    for _ in range(30):  # wait up to 3 s
+    _log(sid, f"[dashy] killing port {port} (sudo fuser -k)")
+    try:
+        subprocess.run(
+            ["sudo", "fuser", "-k", f"{port}/tcp"],
+            timeout=5,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        _log(sid, f"[dashy] fuser -k error: {e}")
+    # Wait up to 3 s for port to free
+    for _ in range(30):
         time.sleep(0.1)
         if not check_port(port):
             _log(sid, "[dashy] stopped")
             return True
-    survivors = [p for p in pids_on_port(port) if p != my_pid]
-    if survivors:
-        _log(sid, f"[dashy] escalating to SIGKILL for pids {survivors}")
-        for pid in survivors:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-    return not check_port(port)
+    _log(sid, f"[dashy] port {port} still bound after kill attempt")
+    return False
 
 
 def action_stop(svc: dict) -> dict:
