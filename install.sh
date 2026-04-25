@@ -33,6 +33,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   systemctl daemon-reload
 
   rm -f "$SUDOERS_FILE"
+  rm -f /usr/local/bin/dashy-set-restart
 
   # Remove old unit name if present
   systemctl disable dev-dashboard 2>/dev/null || true
@@ -58,10 +59,18 @@ ${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/fuser
 ${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop *
 ${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start *
 ${DASHY_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart *
+# dashy: toggle restart policy for systemd-managed services
+${DASHY_USER} ALL=(root) NOPASSWD: /usr/local/bin/dashy-set-restart
 EOF
 chmod 0440 "$SUDOERS_FILE"
 visudo -cf "$SUDOERS_FILE"
 echo "    sudoers rule written: $SUDOERS_FILE (user: $DASHY_USER)"
+
+# helper script for restart policy toggling
+cp "$SCRIPT_DIR/dashy-set-restart.sh" /usr/local/bin/dashy-set-restart
+chmod 0755 /usr/local/bin/dashy-set-restart
+chown root:root /usr/local/bin/dashy-set-restart
+echo "    helper installed: /usr/local/bin/dashy-set-restart"
 
 # systemd unit — patch User= to the installing user
 sed "s|^User=.*|User=${DASHY_USER}|" "$SCRIPT_DIR/${SERVICE_NAME}.service" > "$SERVICE_FILE"

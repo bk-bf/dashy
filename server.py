@@ -25,6 +25,13 @@ _logs_lock = threading.Lock()
 _sse_clients: list = []
 _sse_lock = threading.Lock()
 
+_applied_policies: dict[str, str] = {}  # sid → last restart_policy we applied
+_restart_policy_overrides: dict[
+    str, str
+] = {}  # sid → runtime policy (non-systemd services)
+_intentional_stops: set[str] = set()  # services stopped deliberately via dashy
+_prev_statuses: dict[str, str] = {}  # sid → status from previous scan cycle
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -94,6 +101,30 @@ def refresh_services() -> None:
 
         for svc in new_registry.values():
             _merge_status(svc)
+
+        # Auto-restart non-systemd services that stopped unexpectedly
+        for svc in new_registry.values():
+            sid = svc["id"]
+            status = svc.get("status")
+            prev = _prev_statuses.get(sid)
+            policy = svc.get("_restart_policy", "no")
+            is_systemd = bool(_systemd_unit(svc))
+            crashed = prev == "running" and status in ("stopped", "error")
+            if (
+                not is_systemd
+                and policy in ("always", "on-failure")
+                and status in ("stopped", "error")
+                and crashed
+                and sid not in _intentional_stops
+            ):
+                _log(
+                    sid,
+                    f"[dashy] unexpected stop detected (policy={policy}) — restarting",
+                )
+                threading.Thread(
+                    target=lambda s=svc: action_start(s), daemon=True
+                ).start()
+            _prev_statuses[sid] = status
 
         with _registry_lock:
             _registry.clear()
@@ -203,6 +234,94 @@ def get_uptime(pid: int) -> int | None:
         return None
 
 
+def _systemd_unit(svc: dict) -> str | None:
+    """Extract the primary systemd unit name from stop_cmd or start_cmd."""
+    for cmd in (svc.get("stop_cmd") or "", svc.get("start_cmd") or ""):
+        parts = cmd.split()
+        try:
+            idx = parts.index("systemctl")
+            # systemctl [sudo] <verb> <unit> — unit is two positions after 'systemctl'
+            if idx + 2 < len(parts):
+                return parts[idx + 2]
+        except ValueError:
+            pass
+    return None
+
+
+def _systemd_info(unit: str) -> dict:
+    """Query systemd for restart policy, last exit status, and reverse dependencies."""
+    info: dict = {"restart_policy": None, "exit_status": None, "reverse_deps": []}
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "show", unit, "--property=Restart,ExecMainStatus"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        for line in out.splitlines():
+            if line.startswith("Restart="):
+                info["restart_policy"] = line.split("=", 1)[1]
+            elif line.startswith("ExecMainStatus="):
+                try:
+                    info["exit_status"] = int(line.split("=", 1)[1])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "list-dependencies", unit, "--reverse", "--plain"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
+        # Filter out standard system targets — every enabled service is a dep of these
+        _SYSTEM_TARGETS = {
+            "multi-user.target",
+            "graphical.target",
+            "default.target",
+            "sysinit.target",
+            "basic.target",
+            "network.target",
+        }
+        info["reverse_deps"] = [l for l in lines[1:] if l and l not in _SYSTEM_TARGETS]
+    except Exception:
+        pass
+    return info
+
+
+def _auto_apply_restart_policy(svc: dict, unit: str, sd: dict) -> None:
+    """If dashy.json declares restart_policy and it differs from current, apply it once."""
+    declared = svc.get("restart_policy")
+    if not declared:
+        return
+    sid = svc["id"]
+    current = sd.get("restart_policy")
+    if current == declared:
+        _applied_policies[sid] = declared
+        return
+    if _applied_policies.get(sid) == declared:
+        return  # already attempted this cycle — don't hammer systemd every scan
+
+    def _do():
+        try:
+            subprocess.run(
+                ["sudo", "/usr/local/bin/dashy-set-restart", unit, declared],
+                check=True,
+                timeout=15,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            _applied_policies[sid] = declared
+            _log(sid, f"[dashy] auto-applied Restart={declared} from dashy.json")
+        except Exception as e:
+            _log(sid, f"[dashy] auto-apply restart_policy failed: {e}")
+        _refresh_status(sid)
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
 def _merge_status(svc: dict) -> None:
     pid_file = svc.get("pid_file")
     pid_info = check_pid(pid_file)
@@ -230,6 +349,41 @@ def _merge_status(svc: dict) -> None:
     svc["port_bound"] = port_bound
     svc["uptime_sec"] = get_uptime(pid) if alive and pid else None
 
+    # Systemd dependency/restart health warnings
+    unit = _systemd_unit(svc)
+    if unit:
+        sd = _systemd_info(unit)
+        svc["_systemd"] = sd
+        warns = []
+        if sd["restart_policy"] == "always":
+            warns.append(
+                f"Restart=always on '{unit}' — stop may not stick (change to on-failure)"
+            )
+        if sd["reverse_deps"]:
+            warns.append(
+                f"reverse deps: {', '.join(sd['reverse_deps'])} — may restart this service"
+            )
+        # Exit status 0 = clean; 15 = SIGTERM (systemctl stop); 9 = SIGKILL — all normal
+        _CLEAN_EXIT = {0, 9, 15}
+        if sd["exit_status"] not in (None, *_CLEAN_EXIT) and status == "stopped":
+            warns.append(
+                f"last exit status: {sd['exit_status']} — systemd may treat this as a crash"
+            )
+        svc["systemd_warnings"] = warns
+        _auto_apply_restart_policy(svc, unit, sd)
+    else:
+        svc.setdefault("systemd_warnings", [])
+
+    # Unified _restart_policy field for all services (used by UI toggle)
+    if unit and svc.get("_systemd"):
+        svc["_restart_policy"] = svc["_systemd"].get("restart_policy") or "no"
+    else:
+        svc["_restart_policy"] = (
+            _restart_policy_overrides.get(svc["id"])
+            or svc.get("restart_policy")
+            or "no"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -252,6 +406,7 @@ def _stream_output(sid: str, proc: subprocess.Popen) -> None:
 
 def action_start(svc: dict) -> dict:
     sid = svc["id"]
+    _intentional_stops.discard(sid)
     start_cmd = svc.get("start_cmd")
     cwd = svc.get("cwd")
     if not start_cmd:
@@ -315,6 +470,7 @@ def action_stop(svc: dict) -> dict:
     stop_cmd = svc.get("stop_cmd")
     pid_file = svc.get("pid_file")
     port = svc.get("port")
+    _intentional_stops.add(sid)
 
     def _cleanup_pid_file():
         if pid_file:
@@ -358,6 +514,44 @@ def action_stop(svc: dict) -> dict:
 
     threading.Thread(target=_do_stop, daemon=True).start()
     return {"ok": True, "message": "stopping"}
+
+
+def action_set_restart(svc: dict, policy: str) -> dict:
+    """Set restart policy. Systemd services: dropin via helper. Others: in-memory override."""
+    if policy not in ("always", "on-failure", "no"):
+        return {"ok": False, "message": f"invalid policy: {policy}"}
+    sid = svc["id"]
+    unit = _systemd_unit(svc)
+
+    if not unit:
+        # Non-systemd: store override, update svc immediately, broadcast
+        _restart_policy_overrides[sid] = policy
+        _log(sid, f"[dashy] restart policy set to {policy}")
+        threading.Thread(target=lambda: _refresh_status(sid), daemon=True).start()
+        return {"ok": True, "message": f"restart_policy={policy}"}
+
+    def _do():
+        try:
+            result = subprocess.run(
+                ["sudo", "/usr/local/bin/dashy-set-restart", unit, policy],
+                check=True,
+                timeout=15,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            for line in (result.stdout or "").splitlines():
+                _log(sid, f"[dashy] {line}")
+        except subprocess.CalledProcessError as e:
+            _log(
+                sid, f"[dashy] set-restart failed: {(e.output or '').strip() or str(e)}"
+            )
+        except Exception as e:
+            _log(sid, f"[dashy] set-restart error: {e}")
+        _refresh_status(sid)
+
+    threading.Thread(target=_do, daemon=True).start()
+    return {"ok": True, "message": f"setting Restart={policy}…"}
 
 
 def action_restart(svc: dict) -> dict:
@@ -527,7 +721,20 @@ class Handler(BaseHTTPRequestHandler):
                             "stop_cmd",
                             "worktree",
                             "log_file",
+                            "restart_policy",
                         ],
+                        "restart_policy": (
+                            "Optional. Applies to all services. "
+                            "Values: 'no' (recommended default — never auto-restart), "
+                            "'on-failure' (restart on crash/error), "
+                            "'always' (restart on any unexpected stop). "
+                            "For systemd-managed services: dashy writes a dropin to "
+                            "/etc/systemd/system/<unit>.d/dashy-restart.conf and reloads on discovery. "
+                            "For dashy-started (pid-file) services: policy is stored in memory "
+                            "(declare in dashy.json to persist across dashy restarts); dashy "
+                            "auto-restarts on unexpected stop detected during scan. "
+                            "Clicking Stop always suppresses auto-restart regardless of policy."
+                        ),
                         "id_convention": "<project>-<worktree>-<role>  (omit worktree segment for main branch)",
                         "stop_cmd_null": "dashy kills via pid_file: SIGTERM → 5s → SIGKILL",
                         "pid_file": "absolute path written by start_cmd; may not exist when stopped",
@@ -614,6 +821,11 @@ class Handler(BaseHTTPRequestHandler):
                     target=lambda: _refresh_status(sid), daemon=True
                 ).start()
                 return self.send_json(result)
+            elif action == "set-restart":
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                policy = body.get("policy", "")
+                return self.send_json(action_set_restart(svc, policy))
             else:
                 return self.send_error(404)
 
@@ -673,6 +885,26 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     # Check for systemd stop_cmd with Restart=always anti-pattern
                     stop_cmd = svc.get("stop_cmd") or ""
+                    start_cmd = svc.get("start_cmd") or ""
+                    is_systemd = "systemctl" in stop_cmd or "systemctl" in start_cmd
+                    if is_systemd:
+                        rp = svc.get("restart_policy")
+                        if not rp:
+                            warnings.append(
+                                f"{prefix}: systemd-managed service has no 'restart_policy' field — "
+                                'add \'"restart_policy": "no"\' so dashy enforces the policy on discovery '
+                                "(no = dashy controls start/stop; on-failure = restart on crash only)"
+                            )
+                        elif rp not in ("no", "on-failure", "always"):
+                            errors.append(
+                                f"{prefix}: invalid restart_policy '{rp}' — "
+                                "must be 'no', 'on-failure', or 'always'"
+                            )
+                        elif rp == "always":
+                            warnings.append(
+                                f"{prefix}: restart_policy 'always' — "
+                                "the stop button will not work reliably; prefer 'no' or 'on-failure'"
+                            )
                     if "systemctl stop" in stop_cmd:
                         unit = stop_cmd.strip().split()[-1]
                         try:

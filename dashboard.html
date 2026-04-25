@@ -149,6 +149,7 @@ select.hdr-select option { background: #1a1c22; }
   max-width: none;
 }
 .col-name   { color: var(--text); font-weight: 600; }
+.sysw { color: var(--amber); font-size: 10px; cursor: help; margin-left: 5px; vertical-align: middle; }
 .col-port   { color: var(--dim); }
 .col-status { }
 .col-wt     { color: var(--dim); }
@@ -189,6 +190,12 @@ select.hdr-select option { background: #1a1c22; }
 .act-btn.restart:hover{ color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
 .act-btn.open:hover   { color: var(--blue);  border-color: var(--blue);  background: var(--blue-bg); }
 .act-btn.clean:hover  { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
+.act-btn.policy-always  { color: var(--amber); border-color: var(--amber); }
+.act-btn.policy-always:hover { background: var(--amber-bg); }
+.act-btn.policy-onfail  { color: var(--green); border-color: var(--green); }
+.act-btn.policy-onfail:hover { background: var(--green-bg); }
+.act-btn.policy-no      { color: var(--muted); border-color: var(--muted); }
+.act-btn.policy-no:hover { color: var(--text); background: var(--surface); }
 
 /* ── batch buttons (section header) ── */
 .batch-btn {
@@ -519,14 +526,26 @@ function render() {
 
 function renderRow(svc) {
   const sid = escHtml(svc.id);
+  const warns = svc.systemd_warnings || [];
+  const warnIcon = warns.length
+    ? `<span class="sysw" title="${escHtml(warns.join('\n'))}">⚠</span>`
+    : '';
   const openBtn  = svc.port
     ? `<button class="act-btn open"  onclick="window.open('http://'+window.location.hostname+':${svc.port}','_blank')" title="Open in new tab">↗</button>`
     : '';
   const cleanBtn = (svc.status === 'zombie' || svc.status === 'error')
     ? `<button class="act-btn clean" onclick="doAction('${sid}','clean')" title="Clean zombie">✕</button>`
     : '';
+  const sd = svc._systemd;
+  const pol = svc._restart_policy || 'no';
+  const cycle = { 'always': 'on-failure', 'on-failure': 'no', 'no': 'always' };
+  const cls   = { 'always': 'policy-always', 'on-failure': 'policy-onfail', 'no': 'policy-no' };
+  const label = { 'always': '↺ always', 'on-failure': '↺ on-fail', 'no': '↺ never' };
+  const tip   = { 'always': 'Restart=always — click → on-failure', 'on-failure': 'Restart=on-failure — click → never', 'no': 'Restart=no — click → always' };
+  const next = cycle[pol] || 'on-failure';
+  const restartPolicyBtn = `<button class="act-btn ${cls[pol] || 'policy-no'}" onclick="setRestartPolicy('${sid}','${next}')" title="${tip[pol] || ''}">${label[pol] || '↺ ?'}</button>`;
   return `<tr onclick="openLogPanel('${sid}')" id="row-${sid}">
-  <td class="col-name"   title="${escHtml(svc.name)}">${escHtml(svc.name)}</td>
+  <td class="col-name"   title="${escHtml(svc.name)}">${escHtml(svc.name)}${warnIcon}</td>
   <td class="col-port">${svc.port ? escHtml(String(svc.port)) : '—'}</td>
   <td class="col-status">${statusBadge(svc.status || 'stopped')}</td>
   <td class="col-wt"     title="${escHtml(svc.worktree||'')}">${svc.worktree ? escHtml(svc.worktree) : '<span style="color:var(--muted)">main</span>'}</td>
@@ -536,7 +555,7 @@ function renderRow(svc) {
       <button class="act-btn start"   onclick="doAction('${sid}','start')"            title="Start">▶</button>
       <button class="act-btn stop"    onclick="confirmAction('${sid}','stop')"         title="Stop">■</button>
       <button class="act-btn restart" onclick="confirmAction('${sid}','restart')"      title="Restart">↺</button>
-      ${openBtn}${cleanBtn}
+      ${openBtn}${cleanBtn}${restartPolicyBtn}
     </div>
   </td>
 </tr>`;
@@ -577,6 +596,28 @@ async function doAction(id, action) {
     await fetch(`/api/services/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
   } catch (e) {
     console.error('action failed', e);
+  }
+}
+
+async function setRestartPolicy(id, policy) {
+  // Optimistic update — flip _restart_policy immediately
+  const svc = services.find(s => s.id === id);
+  if (svc) {
+    svc._restart_policy = policy;
+    if (svc._systemd) svc._systemd.restart_policy = policy;
+    svc.systemd_warnings = (svc.systemd_warnings || []).filter(w => !w.startsWith('Restart=always'));
+    render();
+  }
+  try {
+    const r = await fetch(`/api/services/${encodeURIComponent(id)}/set-restart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ policy }),
+    });
+    const data = await r.json();
+    if (!data.ok) console.error('set-restart failed:', data.message);
+  } catch (e) {
+    console.error('set-restart error', e);
   }
 }
 
@@ -626,11 +667,17 @@ async function refreshLog() {
     const r = await fetch(`/api/services/${encodeURIComponent(activeServiceId)}/log`);
     if (!r.ok) return;
     const data = await r.json();
+    const svc = services.find(s => s.id === activeServiceId);
+    const warns = (svc && svc.systemd_warnings) || [];
+    const warnLines = warns.map(w =>
+      `<span class="log-line log-dashy" style="color:var(--amber)">[systemd] ${escHtml(w)}</span>`
+    );
     const el = document.getElementById('log-content');
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.innerHTML = data.lines.length
+    const logLines = data.lines.length
       ? data.lines.map(l => `<span class="log-line${l.startsWith('[dashy]') ? ' log-dashy' : ''}">${escHtml(l)}</span>`).join('\n')
       : '<span style="color:var(--muted)">no output yet</span>';
+    el.innerHTML = (warnLines.length ? warnLines.join('\n') + '\n' : '') + logLines;
     if (atBottom) el.scrollTop = el.scrollHeight;
   } catch {}
 }

@@ -103,6 +103,7 @@ curl -s -X POST http://localhost:7800/api/config/scan_roots \
 | `services[].pid_file` | no | Absolute path. Written by `start_cmd`; may not exist yet (stopped state). Required if `stop_cmd` is null. |
 | `services[].stop_cmd` | no | Shell string. `null` → dashy kills via `pid_file` (SIGTERM → 5 s → SIGKILL). |
 | `services[].log_file` | no | Absolute path to a log file. Shown in the dashboard log panel when the process was **not** started by dashy (e.g. systemd-managed or externally started). dashy reads the last 200 lines. Ignored if dashy holds an in-memory ring buffer for the process. |
+| `services[].restart_policy` | no | `"no"` · `"on-failure"` · `"always"`. **systemd-managed services only.** dashy auto-applies this via a dropin on discovery. See below. |
 
 > **Network binding**: dashy's status check only tests whether the port is bound — it does not distinguish `127.0.0.1` from `0.0.0.0`. If the service needs to be reachable from outside localhost (e.g. over Tailscale), ensure `start_cmd` launches the server bound to `0.0.0.0` or the appropriate interface. For vite: set `host: '0.0.0.0'` and `allowedHosts: ['your-hostname']` in `vite.config.ts`, or pass `--host` on the command line.
 
@@ -137,7 +138,7 @@ curl -s -X POST http://localhost:7800/api/config/scan_roots \
 
 ### systemd-managed service (no pid_file)
 
-When systemd owns the process, use `stop_cmd` instead:
+When systemd owns the process, use `stop_cmd` instead and declare `restart_policy`:
 
 ```json
 {
@@ -147,26 +148,40 @@ When systemd owns the process, use `stop_cmd` instead:
   "pid_file": null,
   "start_cmd": "sudo systemctl start my-project-api",
   "stop_cmd": "sudo systemctl stop my-project-api",
+  "restart_policy": "no",
   "cwd": "/home/ubuntu/server/my-project"
 }
 ```
 
-**Critical: use `Restart=on-failure` not `Restart=always` in the unit.**
+### `restart_policy` — what to set and why
 
-`Restart=always` means systemd will respawn the process after *any* exit, including a
-clean `systemctl stop`. This directly fights dashy's stop mechanism — the service
-will reappear a few seconds after every stop. The correct setting for a dev service
-that dashy manages is:
+dashy enforces `restart_policy` differently depending on whether the service is
+systemd-managed or started directly by dashy.
 
-```ini
-[Service]
-Restart=on-failure   # restarts on crash only; respects systemctl stop
-RestartSec=5
-```
+**Systemd-managed services** (`start_cmd` / `stop_cmd` contains `systemctl`):
+dashy auto-applies the policy via a dropin
+(`/etc/systemd/system/<unit>.d/dashy-restart.conf`) on first discovery and whenever
+it detects drift. The dropin survives reboots and overrides the unit file without
+modifying it.
 
-`Restart=always` is only appropriate for production services that must never be
-intentionally stopped from outside systemd. If you dock such a service into dashy,
-the stop button will not work reliably.
+**Dashy-started services** (pid-file based, dashy runs `start_cmd` directly):
+The policy is stored in memory by dashy (lost on dashy restart; declare it in
+`dashy.json` to persist across restarts). dashy monitors status on every scan
+and auto-restarts the process if it stopped unexpectedly.
+
+"Unexpected stop" means the service was `running` on the previous scan and is now
+`stopped` or `error`, **and** dashy did not initiate the stop. Clicking the Stop
+button always suppresses auto-restart regardless of policy.
+
+| Value | Systemd behaviour | Dashy-started behaviour | When to use |
+|---|---|---|---|
+| `"no"` | **Recommended default.** systemd never auto-restarts. | dashy never auto-restarts. | Dev services, anything dashy fully controls. |
+| `"on-failure"` | Restarts on crash (non-zero exit). Respects `systemctl stop`. | dashy restarts when status transitions `running → error`. | Services that should survive crashes but stay stopped when intentionally stopped. |
+| `"always"` | Restarts after any exit including clean stop. **Stop button will not work reliably.** | dashy restarts on any unexpected stop (`running → stopped` or `error`). | Use with care; avoid for dev services. |
+
+The policy can always be toggled at runtime from the dashboard toggle button (cycles
+`always → on-failure → never`). For systemd services the change is written to disk;
+for dashy-started services it is runtime-only unless also declared in `dashy.json`.
 
 ---
 
@@ -214,10 +229,12 @@ curl -s http://localhost:7800/api/services | jq '.[] | select(.project=="my-proj
 
 When an agent is told to "dock into dashy":
 
-1. `GET http://localhost:7800/api/dock` — read `scan_roots` and `scan_interval_sec`.
+1. `GET http://localhost:7800/api/dock` — read `scan_roots`, `scan_interval_sec`, and the `contract` block (includes `restart_policy` guidance).
 2. Check whether the project root is under a `scan_root`. If not, POST to add it.
 3. Determine all services the project runs (ports, pid files, start commands).
 4. Write `dashy.json` to the project or worktree root following the schema above.
-5. `POST /api/dock/validate` with `_source_hint` set — fix any errors.
+   - For systemd-managed services: always include `"restart_policy": "no"` unless there is a specific reason for crash-recovery (`"on-failure"`) or the service must never stop (`"always"`).
+   - For pid-file or dashy-started services: omit `restart_policy`.
+5. `POST /api/dock/validate` with `_source_hint` set — fix any errors, review warnings.
 6. Commit the file.
 7. Verify: `curl http://localhost:7800/api/services | jq '.[] | select(.project=="<name>") | {id,status}'`
