@@ -545,8 +545,11 @@ function renderRow(svc) {
   const tip   = { 'always': 'Restart=always — click → on-failure', 'on-failure': 'Restart=on-failure — click → never', 'no': 'Restart=no — click → always' };
   const next = cycle[pol] || 'on-failure';
   const restartPolicyBtn = `<button class="act-btn ${cls[pol] || 'policy-no'}" onclick="setRestartPolicy('${sid}','${next}')" title="${tip[pol] || ''}">${label[pol] || '↺ ?'}</button>`;
-  const isAlwaysOn = pol === 'always';
-  const disabledAttr = isAlwaysOn ? ' disabled title="Restart=always — stop will not stick"' : '';
+  const isAlwaysOn    = pol === 'always';
+  const isTransient   = svc.status === 'starting' || svc.status === 'stopping';
+  const disabledAttr  = isAlwaysOn  ? ' disabled title="Restart=always — stop will not stick"'
+                      : isTransient ? ' disabled'
+                      : '';
   return `<tr onclick="openLogPanel('${sid}')" id="row-${sid}">
   <td class="col-name"   title="${escHtml(svc.name)}">${escHtml(svc.name)}${warnIcon}</td>
   <td class="col-port">${svc.port ? escHtml(String(svc.port)) : '—'}</td>
@@ -595,6 +598,13 @@ document.getElementById('modal-confirm-btn').addEventListener('click', () => {
 });
 
 async function doAction(id, action) {
+  // Optimistic status update
+  const svc = services.find(s => s.id === id);
+  if (svc) {
+    if (action === 'start' || action === 'restart') svc.status = 'starting';
+    else if (action === 'stop') svc.status = 'stopping';
+    render();
+  }
   try {
     await fetch(`/api/services/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
   } catch (e) {
