@@ -324,6 +324,7 @@ def action_stop(svc: dict) -> dict:
                 pass
 
     def _do_stop():
+        stop_cmd_succeeded = False
         if stop_cmd:
             _log(sid, f"[dashy] stop_cmd: {stop_cmd}")
             try:
@@ -339,13 +340,17 @@ def action_stop(svc: dict) -> dict:
                     _log(sid, line)
                 if proc.returncode != 0:
                     _log(sid, f"[dashy] stop_cmd exited {proc.returncode}")
+                else:
+                    stop_cmd_succeeded = True
             except subprocess.TimeoutExpired:
                 _log(sid, "[dashy] stop_cmd timed out — falling back to port-kill")
             except Exception as e:
                 _log(sid, f"[dashy] stop_cmd error: {e}")
 
-        # Always attempt port-kill — handles externally-started and stop_cmd failures
-        if port and check_port(port):
+        # Only port-kill if there was no stop_cmd or it failed — never after a
+        # successful systemctl stop, as an external SIGKILL would look like a
+        # crash to systemd and trigger Restart=on-failure
+        if not stop_cmd_succeeded and port and check_port(port):
             _kill_port(sid, port)
 
         _cleanup_pid_file()
