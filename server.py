@@ -31,6 +31,7 @@ _restart_policy_overrides: dict[
 ] = {}  # sid → runtime policy (non-systemd services)
 _intentional_stops: set[str] = set()  # services stopped deliberately via dashy
 _prev_statuses: dict[str, str] = {}  # sid → status from previous scan cycle
+_shell_pids: dict[str, int] = {}  # sid → shell PID of dashy-started process
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +254,7 @@ def _systemd_info(unit: str) -> dict:
     info: dict = {"restart_policy": None, "exit_status": None, "reverse_deps": []}
     try:
         out = subprocess.check_output(
-            ["systemctl", "show", unit, "--property=Restart,ExecMainStatus"],
+            ["systemctl", "show", unit, "--property=Restart,ExecMainStatus,MainPID"],
             text=True,
             stderr=subprocess.DEVNULL,
             timeout=2,
@@ -264,6 +265,12 @@ def _systemd_info(unit: str) -> dict:
             elif line.startswith("ExecMainStatus="):
                 try:
                     info["exit_status"] = int(line.split("=", 1)[1])
+                except ValueError:
+                    pass
+            elif line.startswith("MainPID="):
+                try:
+                    pid = int(line.split("=", 1)[1])
+                    info["main_pid"] = pid if pid > 0 else None
                 except ValueError:
                     pass
     except Exception:
@@ -337,9 +344,7 @@ def _merge_status(svc: dict) -> None:
         # No pid tracking — check systemd first, then fall back to port presence
         _unit_early = _systemd_unit(svc)
         if _unit_early:
-            import subprocess as _sp
-
-            _rc = _sp.run(
+            _rc = subprocess.run(
                 ["systemctl", "is-active", "--quiet", _unit_early],
                 capture_output=True,
             ).returncode
@@ -364,9 +369,22 @@ def _merge_status(svc: dict) -> None:
 
     # Systemd dependency/restart health warnings
     unit = _systemd_unit(svc)
+    if svc["pid"] is None and status == "running" and not unit and svc.get("port"):
+        # Port-bound, no pid_file, no systemd — use shell PID tracked at start time
+        shell_pid = _shell_pids.get(svc["id"])
+        if shell_pid:
+            svc["pid"] = shell_pid
+            svc["uptime_sec"] = get_uptime(shell_pid)
+
     if unit:
         sd = _systemd_info(unit)
         svc["_systemd"] = sd
+        # Use MainPID from systemd for uptime when no pid_file
+        if svc["pid"] is None and status == "running":
+            sd_pid = sd.get("main_pid")
+            if sd_pid:
+                svc["pid"] = sd_pid
+                svc["uptime_sec"] = get_uptime(sd_pid)
         warns = []
         effective_pol = _restart_policy_overrides.get(svc["id"]) or sd["restart_policy"]
         if effective_pol == "always":
@@ -441,6 +459,7 @@ def action_start(svc: dict) -> dict:
         )
         t = threading.Thread(target=_stream_output, args=(sid, proc), daemon=True)
         t.start()
+        _shell_pids[sid] = proc.pid
         return {"ok": True, "message": "started"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -486,6 +505,7 @@ def action_stop(svc: dict) -> dict:
     pid_file = svc.get("pid_file")
     port = svc.get("port")
     _intentional_stops.add(sid)
+    _shell_pids.pop(sid, None)
 
     def _cleanup_pid_file():
         if pid_file:
