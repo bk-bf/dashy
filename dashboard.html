@@ -270,64 +270,6 @@ select.hdr-select option { background: #1a1c22; }
 .modal-btn.confirm { color: var(--red); border-color: var(--red); }
 .modal-btn.confirm:hover { background: var(--red-bg); }
 
-/* ── add-root drawer ── */
-#root-drawer {
-  position: fixed;
-  top: 0; right: 0; bottom: 0;
-  width: 340px;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-  box-shadow: -12px 0 40px rgba(0,0,0,.6);
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  transform: translateX(100%);
-  transition: transform .2s ease;
-}
-#root-drawer.open { transform: translateX(0); }
-#root-backdrop {
-  display: none; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.35);
-}
-#root-backdrop.open { display: block; }
-.drawer-hdr {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 13px 16px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
-.drawer-hdr-title { font-size: 11px; font-weight: 700; letter-spacing: .07em; color: var(--dim); text-transform: uppercase; }
-.drawer-body { padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
-.drawer-label { font-size: 10px; letter-spacing: .05em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-.drawer-input {
-  background: var(--bg); border: 1px solid var(--border); color: var(--text);
-  font-family: inherit; font-size: 12px; padding: 7px 10px; width: 100%; outline: none;
-}
-.drawer-input:focus { border-color: var(--blue); }
-#autocomplete-list { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
-.ac-item {
-  padding: 5px 8px; font-size: 11px; color: var(--dim); cursor: pointer;
-  border: 1px solid transparent; transition: color .1s;
-}
-.ac-item:hover { color: var(--text); border-color: var(--border); background: var(--bg); }
-.drawer-actions { display: flex; gap: 10px; }
-.drawer-btn {
-  background: none; border: 1px solid var(--border); color: var(--muted);
-  font-family: inherit; font-size: 11px; padding: 6px 16px; cursor: pointer;
-  transition: color .1s, border-color .1s, background .1s;
-}
-.drawer-btn:hover { color: var(--text); border-color: var(--muted); background: #222; }
-.drawer-btn.primary { color: var(--blue); border-color: var(--blue); }
-.drawer-btn.primary:hover { background: var(--blue-bg); }
-.drawer-status { font-size: 10px; color: var(--muted); min-height: 14px; }
-
-/* ── scan roots list ── */
-.roots-list { display: flex; flex-direction: column; gap: 4px; }
-.root-item {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 8px; border: 1px solid var(--border); font-size: 11px;
-}
-.root-item span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.root-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 0 2px; flex-shrink: 0; }
-.root-remove:hover { color: var(--red); }
-
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); }
@@ -345,9 +287,8 @@ select.hdr-select option { background: #1a1c22; }
       <option value="5">refresh: 5s</option>
       <option value="30">refresh: 30s</option>
       <option value="0">refresh: off</option>
-    </select>
+     </select>
     <div class="header-meta">
-      <button class="icon-btn" onclick="openRootDrawer()">+ scan root</button>
       <div class="live-indicator">
         <div class="live-dot" id="live-dot"></div>
         <span class="live-label" id="live-label">live</span>
@@ -383,32 +324,6 @@ select.hdr-select option { background: #1a1c22; }
       <button class="modal-btn" onclick="closeModal()">cancel</button>
       <button class="modal-btn confirm" id="modal-confirm-btn">confirm</button>
     </div>
-  </div>
-</div>
-
-<!-- add-root drawer -->
-<div id="root-backdrop" onclick="closeRootDrawer()"></div>
-<div id="root-drawer">
-  <div class="drawer-hdr">
-    <span class="drawer-hdr-title">scan roots</span>
-    <button class="icon-btn" onclick="closeRootDrawer()">✕ close</button>
-  </div>
-  <div class="drawer-body">
-    <div>
-      <div class="drawer-label">current roots</div>
-      <div class="roots-list" id="roots-list"></div>
-    </div>
-    <div>
-      <div class="drawer-label">add root</div>
-      <input class="drawer-input" id="root-input" type="text" placeholder="/home/ubuntu/server/…"
-        oninput="onRootInput()" onkeydown="onRootKey(event)" autocomplete="off" spellcheck="false">
-      <div id="autocomplete-list" style="margin-top:4px"></div>
-    </div>
-    <div class="drawer-actions">
-      <button class="drawer-btn primary" onclick="addRoot()">add</button>
-      <button class="drawer-btn" onclick="closeRootDrawer()">cancel</button>
-    </div>
-    <div class="drawer-status" id="drawer-status"></div>
   </div>
 </div>
 
@@ -687,100 +602,6 @@ function closeLogPanel() {
     document.body.style.userSelect = '';
   });
 })();
-
-// ── Add-root drawer ───────────────────────────────────────────────────────────
-async function openRootDrawer() {
-  await loadRoots();
-  document.getElementById('root-drawer').classList.add('open');
-  document.getElementById('root-backdrop').classList.add('open');
-  document.getElementById('root-input').value = '';
-  document.getElementById('autocomplete-list').innerHTML = '';
-  document.getElementById('drawer-status').textContent = '';
-}
-
-function closeRootDrawer() {
-  document.getElementById('root-drawer').classList.remove('open');
-  document.getElementById('root-backdrop').classList.remove('open');
-}
-
-async function loadRoots() {
-  try {
-    const r = await fetch('/api/config');
-    const cfg = await r.json();
-    const roots = cfg.scan_roots || [];
-    document.getElementById('roots-list').innerHTML = roots.length
-      ? roots.map(root => `
-          <div class="root-item">
-            <span title="${escHtml(root)}">${escHtml(root)}</span>
-            <button class="root-remove" onclick="removeRoot('${escHtml(root)}')" title="Remove">✕</button>
-          </div>`).join('')
-      : '<span style="color:var(--muted);font-size:11px">none</span>';
-  } catch {}
-}
-
-async function removeRoot(root) {
-  await fetch('/api/config/scan_roots', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ action: 'remove', root })
-  });
-  await loadRoots();
-}
-
-async function addRoot() {
-  const root = document.getElementById('root-input').value.trim();
-  const status = document.getElementById('drawer-status');
-  if (!root) return;
-  try {
-    const r = await fetch('/api/config/scan_roots', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ action: 'add', root })
-    });
-    const data = await r.json();
-    if (data.ok) {
-      status.style.color = 'var(--green)';
-      status.textContent = 'added';
-      document.getElementById('root-input').value = '';
-      document.getElementById('autocomplete-list').innerHTML = '';
-      await loadRoots();
-      setTimeout(() => { status.textContent = ''; }, 2000);
-    } else {
-      status.style.color = 'var(--red)';
-      status.textContent = data.message || 'error';
-    }
-  } catch (e) {
-    status.style.color = 'var(--red)';
-    status.textContent = String(e);
-  }
-}
-
-let acTimer = null;
-function onRootInput() {
-  clearTimeout(acTimer);
-  acTimer = setTimeout(fetchAutocomplete, 120);
-}
-
-function onRootKey(e) {
-  if (e.key === 'Enter') addRoot();
-}
-
-async function fetchAutocomplete() {
-  const q = document.getElementById('root-input').value;
-  if (!q) { document.getElementById('autocomplete-list').innerHTML = ''; return; }
-  try {
-    const r = await fetch(`/api/fs/dirs?q=${encodeURIComponent(q)}`);
-    const dirs = await r.json();
-    document.getElementById('autocomplete-list').innerHTML = dirs
-      .map(d => `<div class="ac-item" onclick="selectAc('${escHtml(d)}')">${escHtml(d)}</div>`)
-      .join('');
-  } catch {}
-}
-
-function selectAc(path) {
-  document.getElementById('root-input').value = path;
-  document.getElementById('autocomplete-list').innerHTML = '';
-}
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 connectSSE();
