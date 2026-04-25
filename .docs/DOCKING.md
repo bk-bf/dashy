@@ -151,6 +151,23 @@ When systemd owns the process, use `stop_cmd` instead:
 }
 ```
 
+**Critical: use `Restart=on-failure` not `Restart=always` in the unit.**
+
+`Restart=always` means systemd will respawn the process after *any* exit, including a
+clean `systemctl stop`. This directly fights dashy's stop mechanism — the service
+will reappear a few seconds after every stop. The correct setting for a dev service
+that dashy manages is:
+
+```ini
+[Service]
+Restart=on-failure   # restarts on crash only; respects systemctl stop
+RestartSec=5
+```
+
+`Restart=always` is only appropriate for production services that must never be
+intentionally stopped from outside systemd. If you dock such a service into dashy,
+the stop button will not work reliably.
+
 ---
 
 ## 3. Validate before committing (optional but recommended)
