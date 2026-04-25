@@ -300,6 +300,9 @@ def _auto_apply_restart_policy(svc: dict, unit: str, sd: dict) -> None:
     current = sd.get("restart_policy")
     if current == declared:
         _applied_policies[sid] = declared
+        _restart_policy_overrides.pop(
+            sid, None
+        )  # systemd confirmed — override no longer needed
         return
     if _applied_policies.get(sid) == declared:
         return  # already attempted this cycle — don't hammer systemd every scan
@@ -374,15 +377,16 @@ def _merge_status(svc: dict) -> None:
     else:
         svc.setdefault("systemd_warnings", [])
 
-    # Unified _restart_policy field for all services (used by UI toggle)
-    if unit and svc.get("_systemd"):
+    # Unified _restart_policy field for all services (used by UI toggle).
+    # Override takes precedence over live systemd state — set on manual toggle,
+    # cleared by _auto_apply_restart_policy once systemd confirms the change.
+    override = _restart_policy_overrides.get(svc["id"])
+    if override:
+        svc["_restart_policy"] = override
+    elif unit and svc.get("_systemd"):
         svc["_restart_policy"] = svc["_systemd"].get("restart_policy") or "no"
     else:
-        svc["_restart_policy"] = (
-            _restart_policy_overrides.get(svc["id"])
-            or svc.get("restart_policy")
-            or "no"
-        )
+        svc["_restart_policy"] = svc.get("restart_policy") or "no"
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +533,9 @@ def action_set_restart(svc: dict, policy: str) -> dict:
         _log(sid, f"[dashy] restart policy set to {policy}")
         threading.Thread(target=lambda: _refresh_status(sid), daemon=True).start()
         return {"ok": True, "message": f"restart_policy={policy}"}
+
+    # Systemd: set override immediately so scans don't revert the UI while dropin is being written
+    _restart_policy_overrides[sid] = policy
 
     def _do():
         try:
