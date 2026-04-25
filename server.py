@@ -666,6 +666,26 @@ class Handler(BaseHTTPRequestHandler):
                             f"{prefix}: no pid_file and no stop_cmd — "
                             "dashy will be unable to stop this service"
                         )
+                    # Check for systemd stop_cmd with Restart=always anti-pattern
+                    stop_cmd = svc.get("stop_cmd") or ""
+                    if "systemctl stop" in stop_cmd:
+                        unit = stop_cmd.strip().split()[-1]
+                        try:
+                            out = subprocess.check_output(
+                                ["systemctl", "show", unit, "--property=Restart"],
+                                text=True,
+                                stderr=subprocess.DEVNULL,
+                                timeout=2,
+                            )
+                            if "Restart=always" in out:
+                                warnings.append(
+                                    f"{prefix}: systemd unit '{unit}' has Restart=always — "
+                                    "dashy's stop button will not work reliably because systemd "
+                                    "will respawn the process after every stop. "
+                                    "Change the unit to Restart=on-failure."
+                                )
+                        except Exception:
+                            pass
                     if svc.get("cwd") and not os.path.isabs(svc["cwd"]):
                         errors.append(f"{prefix}: cwd must be an absolute path")
                     if svc.get("pid_file") and not os.path.isabs(svc["pid_file"]):
