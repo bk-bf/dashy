@@ -1,6 +1,6 @@
 # dashy
 
-Local dev service control plane. Stdlib Python BFF at port `7800` + single-file vanilla JS dashboard. Auto-discovers services via `devdash.json` files committed to project/worktree roots.
+Local dev service control plane. Stdlib Python BFF at port `7800` + single-file vanilla JS dashboard. Auto-discovers services via `dashy.json` files committed to project/worktree roots.
 
 ## Running
 

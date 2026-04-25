@@ -46,7 +46,7 @@ def save_config(cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def scan_for_devdash(root: str, max_depth: int, excludes: list[str]) -> list[str]:
+def scan_for_dashy(root: str, max_depth: int, excludes: list[str]) -> list[str]:
     results = []
     root = os.path.abspath(root)
     for dirpath, dirnames, filenames in os.walk(root):
@@ -55,12 +55,12 @@ def scan_for_devdash(root: str, max_depth: int, excludes: list[str]) -> list[str
             dirnames.clear()
             continue
         dirnames[:] = [d for d in dirnames if d not in excludes]
-        if "devdash.json" in filenames:
-            results.append(os.path.join(dirpath, "devdash.json"))
+        if "dashy.json" in filenames:
+            results.append(os.path.join(dirpath, "dashy.json"))
     return results
 
 
-def load_manifest(path: str) -> list[dict]:
+def load_dashy_manifest(path: str) -> list[dict]:
     try:
         with open(path) as f:
             data = json.load(f)
@@ -86,8 +86,8 @@ def refresh_services() -> None:
         for root in roots:
             if not os.path.isdir(root):
                 continue
-            for path in scan_for_devdash(root, max_depth, excludes):
-                for svc in load_manifest(path):
+            for path in scan_for_dashy(root, max_depth, excludes):
+                for svc in load_dashy_manifest(path):
                     sid = svc.get("id")
                     if sid:
                         new_registry[sid] = svc
@@ -400,7 +400,7 @@ class Handler(BaseHTTPRequestHandler):
                     "scan_max_depth": cfg.get("scan_max_depth", 4),
                     "scan_exclude": cfg.get("scan_exclude", []),
                     "scan_interval_sec": cfg.get("scan_interval_sec", 10),
-                    "devdash_filename": "devdash.json",
+                    "devdash_filename": "dashy.json",
                     "contract": {
                         "required_fields": ["project", "services"],
                         "service_required_fields": ["id", "name", "start_cmd", "cwd"],
@@ -415,13 +415,26 @@ class Handler(BaseHTTPRequestHandler):
                         "pid_file": "absolute path written by start_cmd; may not exist when stopped",
                     },
                     "instructions": (
-                        "1. Create devdash.json in the project or worktree root. "
+                        "1. Create dashy.json in the project or worktree root. "
                         "2. Ensure that root (or a parent) is listed in scan_roots — "
                         "check this response's scan_roots; if missing POST /api/config/scan_roots. "
                         "3. No registration call needed — dashy picks it up within scan_interval_sec."
                     ),
                 }
             )
+
+        elif path == "/api/dock/guide":
+            doc = os.path.join(BASE_DIR, ".docs", "DOCKING.md")
+            try:
+                with open(doc, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except FileNotFoundError:
+                self.send_error(404, "DOCKING.md not found")
 
         elif path == "/api/fs/dirs":
             import queue as _q

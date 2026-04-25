@@ -3,7 +3,7 @@
 # AGENTS.md — dashy
 
 Local dev service control plane. Stdlib Python BFF (`server.py`) at port `7800` + single-file
-vanilla JS dashboard (`dashboard.html`). Auto-discovers services via `devdash.json` contract files
+vanilla JS dashboard (`dashboard.html`). Auto-discovers services via `dashy.json` contract files
 committed to each project/worktree root.
 
 ## Rules
@@ -13,7 +13,7 @@ committed to each project/worktree root.
 - stdlib Python only — no third-party packages, no build step.
 - `server.py` runs as the `ubuntu` user (systemd service); write code accordingly.
 - Never paste live secrets, credentials, or PII into any file.
-- No env handling in `server.py` — start commands in `devdash.json` are self-contained.
+- No env handling in `server.py` — start commands in `dashy.json` are self-contained.
 
 ## Layout
 
@@ -28,7 +28,7 @@ install.sh             copies unit → /etc/systemd/system/, daemon-reload, enab
     ROADMAP.md         phased implementation plan
 ```
 
-## `devdash.json` contract (what agents create in other repos)
+## `dashy.json` contract (what agents create in other repos)
 
 ```json
 {
@@ -58,7 +58,7 @@ Rules:
 
 ## Adding a project to the dashboard
 
-1. Commit `devdash.json` to the project/worktree root.
+1. Commit `dashy.json` to the project/worktree root.
 2. Ensure the project's dir is under a `scan_root` in `config.json` (or add it via `POST /api/config/scan_roots`).
 3. Dashboard auto-discovers the file within `scan_interval_sec` — no registration call needed.
 

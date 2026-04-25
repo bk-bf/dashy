@@ -3,7 +3,7 @@
 > **Related:** [`/home/ubuntu/server/dashy/`](../../..)
 
 Local dev service control plane. A stdlib Python server + single-file HTML dashboard at port `7800`
-that auto-discovers services across dev projects via committed `devdash.json` contract files, and
+that auto-discovers services across dev projects via committed `dashy.json` contract files, and
 exposes a unified start/stop/status API usable by agents, scripts, and the browser UI.
 
 ---
@@ -17,7 +17,7 @@ exposes a unified start/stop/status API usable by agents, scripts, and the brows
 | 3     | Status engine                  | ✅ done    | ~100       |
 | 4     | Actions API                    | ✅ done    | ~120       |
 | 5     | Dashboard UI                   | ✅ done    | ~800       |
-| 6     | Migration — devdash.json files | ⏳ pending | —          |
+| 6     | Migration — dashy.json files | ⏳ pending | —          |
 | 7     | Systemd install                | ⏳ pending | ~40        |
 
 ---
@@ -61,14 +61,14 @@ Exit: `python3 server.py` starts without error; `curl http://localhost:7800/` re
 
 Implement in `server.py`:
 
-- `scan_for_devdash(root, max_depth, excludes)` — `os.walk` with depth limit and exclude pruning; returns list of `devdash.json` absolute paths.
-- `load_manifest(path)` — parse + validate `devdash.json`; returns list of service dicts with `_source_file` metadata attached.
+- `scan_for_devdash(root, max_depth, excludes)` — `os.walk` with depth limit and exclude pruning; returns list of `dashy.json` absolute paths.
+- `load_manifest(path)` — parse + validate `dashy.json`; returns list of service dicts with `_source_file` metadata attached.
 - `refresh_services()` — background thread running every `scan_interval_sec`; re-scans all roots, merges all manifests into an in-memory service registry dict keyed by `id`.
 - `GET /api/services` — serialise full registry as JSON array.
 - `GET /api/config` — return parsed `config.json`.
 - `POST /api/config/scan_roots` — add/remove a scan root at runtime (persists to `config.json`).
 
-### `devdash.json` schema (the contract)
+### `dashy.json` schema (the contract)
 
 Committed to every project and worktree root. Agents create it; the dashboard picks it up automatically on the next scan.
 
@@ -99,7 +99,7 @@ Field rules:
 - `pid_file` — absolute path; may not exist yet (service stopped state).
 - Future extension: `"type": "docker"` reserved; not implemented in this phase.
 
-Exit: `GET /api/services` returns JSON array containing all services from all `devdash.json` files found under `scan_roots`.
+Exit: `GET /api/services` returns JSON array containing all services from all `dashy.json` files found under `scan_roots`.
 
 ---
 
@@ -214,36 +214,36 @@ Exit: visual parity with openswarm legacy dashboard style; all services visible;
 
 ---
 
-## Phase 6 — Migration: create `devdash.json` files
+## Phase 6 — Migration: create `dashy.json` files
 
-Create one `devdash.json` per project/worktree. Start commands are self-contained and mirror what the current start scripts do.
+Create one `dashy.json` per project/worktree. Start commands are self-contained and mirror what the current start scripts do.
 
 ### yact — main services (systemd-managed)
 
-`/home/ubuntu/server/yact/yact-server/devdash.json`
+`/home/ubuntu/server/yact/yact-server/dashy.json`
 
 Services: `yact-server-api` (port 8000) and `yact-server-miner` — both controlled via `sudo systemctl start/stop yact-coindata-api yact-coindata-miner`. Since systemd manages PIDs, use `start_cmd` wrapping `systemctl`; `pid_file: null`; `stop_cmd` uses `systemctl stop`.
 
-`/home/ubuntu/server/yact/yact-web/devdash.json`
+`/home/ubuntu/server/yact/yact-web/dashy.json`
 
 Service: `yact-web-main` (port 5175). `start_cmd` mirrors `start-main.sh` launch args. `pid_file: "/home/ubuntu/server/yact/.pids/web-main.pid"`.
 
 ### yact — feature worktrees
 
-Each at `<worktree>/devdash.json`. Ports and pid_file names from `ports.json` and `.pids/` naming convention.
+Each at `<worktree>/dashy.json`. Ports and pid_file names from `ports.json` and `.pids/` naming convention.
 
 | File                                                         | Services                                                             | Ports             |
 | ------------------------------------------------------------ | -------------------------------------------------------------------- | ----------------- |
-| `yact-server/features/quant-pipeline/devdash.json`           | `yact-server-quant-pipeline-api`, `yact-server-quant-pipeline-miner` | 8001              |
-| `yact-server/features/t-212-btc-dominance/devdash.json`      | `yact-server-t-212-api`, `yact-server-t-212-miner`                   | (from ports.json) |
-| `yact-web/features/quant-pipeline/devdash.json`              | `yact-web-quant-pipeline`                                            | 5176              |
-| `yact-web/features/t-210-surface-oi/devdash.json`            | `yact-web-t-210`                                                     | (from ports.json) |
-| `yact-web/features/t-211-surface-funding-rates/devdash.json` | `yact-web-t-211`                                                     | (from ports.json) |
-| `yact-web/features/t-212-btc-dominance/devdash.json`         | `yact-web-t-212`                                                     | (from ports.json) |
+| `yact-server/features/quant-pipeline/dashy.json`           | `yact-server-quant-pipeline-api`, `yact-server-quant-pipeline-miner` | 8001              |
+| `yact-server/features/t-212-btc-dominance/dashy.json`      | `yact-server-t-212-api`, `yact-server-t-212-miner`                   | (from ports.json) |
+| `yact-web/features/quant-pipeline/dashy.json`              | `yact-web-quant-pipeline`                                            | 5176              |
+| `yact-web/features/t-210-surface-oi/dashy.json`            | `yact-web-t-210`                                                     | (from ports.json) |
+| `yact-web/features/t-211-surface-funding-rates/dashy.json` | `yact-web-t-211`                                                     | (from ports.json) |
+| `yact-web/features/t-212-btc-dominance/dashy.json`         | `yact-web-t-212`                                                     | (from ports.json) |
 
 ### openswarm
 
-`/home/ubuntu/server/openswarm/devdash.json`
+`/home/ubuntu/server/openswarm/dashy.json`
 
 Services: `openswarm-dashboard` (port 7700, systemd) and `openswarm-dashboard-dev` (port 7701, pid-file at `.pids/dashboard-dev.pid`).
 
@@ -292,7 +292,7 @@ Exit: `systemctl status dev-dashboard` shows `active (running)`; service survive
 2. `curl http://localhost:7800/api/services | jq '[.[] | .status]'` → all running services show `"running"`
 3. Stop a yact feature dev server via UI → status badge changes to `stopped` within 10s; no page refresh needed
 4. Start it → returns to `running`
-5. Drop a new `devdash.json` under any subdir of a scan root → service appears in next refresh without server restart
+5. Drop a new `dashy.json` under any subdir of a scan root → service appears in next refresh without server restart
 6. `systemctl status dev-dashboard` → `active (running)`
 7. `sudo bash /home/ubuntu/server/dashy/install.sh` exits 0
 
@@ -302,11 +302,11 @@ Exit: `systemctl status dev-dashboard` shows `active (running)`; service survive
 
 | Decision                    | Choice                                         | Rationale                                                                           |
 | --------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Contract format             | File (`devdash.json`)                          | Works when service is dead; committed to branch, flows into worktrees automatically |
+| Contract format             | File (`dashy.json`)                          | Works when service is dead; committed to branch, flows into worktrees automatically |
 | Env/secrets                 | Not in contract; `start_cmd` is self-contained | Secrets stay in project `.env`; dashboard never touches them                        |
 | Registration                | Auto-discovery via scan_roots                  | Agent commits the file; no registration call needed                                 |
-| New worktree agent workflow | Create `devdash.json` in worktree root         | Dashboard picks it up within `scan_interval_sec`; zero extra steps                  |
-| yact `start-features.sh`    | Not modified                                   | `devdash.json` start_cmd is per-service, bypasses all-or-nothing script             |
+| New worktree agent workflow | Create `dashy.json` in worktree root         | Dashboard picks it up within `scan_interval_sec`; zero extra steps                  |
+| yact `start-features.sh`    | Not modified                                   | `dashy.json` start_cmd is per-service, bypasses all-or-nothing script             |
 | Process user                | Systemd unit runs as `ubuntu`                  | `start_cmd` executes as ubuntu directly; no sudo wrapper                            |
 | Frontend stack              | Stdlib Python + single-file HTML               | No build step; same pattern as openswarm legacy dashboard                           |
 | Port                        | 7800                                           | Clear of all existing services (yact: 8000–8001, openswarm: 7700–7701)              |

@@ -1,6 +1,6 @@
 # Docking a project into dashy
 
-dashy auto-discovers services via a `devdash.json` file committed to each project or
+dashy auto-discovers services via a `dashy.json` file committed to each project or
 worktree root. No registration call, no dashy restart — it picks the file up within
 `scan_interval_sec` (default 10s).
 
@@ -69,7 +69,7 @@ curl -s -X POST http://localhost:7800/api/config/scan_roots \
 
 ---
 
-## 2. Create `devdash.json` in the project/worktree root
+## 2. Create `dashy.json` in the project/worktree root
 
 ```json
 {
@@ -155,13 +155,13 @@ When systemd owns the process, use `stop_cmd` instead:
 ```bash
 curl -s -X POST http://localhost:7800/api/dock/validate \
   -H 'Content-Type: application/json' \
-  -d @devdash.json | jq '.'
+  -d @dashy.json | jq '.'
 ```
 
 Pass `_source_hint` to also check whether the file location is under a scan root:
 
 ```bash
-jq '. + {"_source_hint": "/home/ubuntu/server/my-project"}' devdash.json \
+jq '. + {"_source_hint": "/home/ubuntu/server/my-project"}' dashy.json \
   | curl -s -X POST http://localhost:7800/api/dock/validate \
     -H 'Content-Type: application/json' -d @- | jq '.'
 ```
@@ -179,7 +179,7 @@ Errors block the service from being discovered correctly. Warnings are advisory.
 ## 4. Commit the file and wait
 
 ```bash
-git add devdash.json && git commit -m "chore: dock into dashy"
+git add dashy.json && git commit -m "chore: dock into dashy"
 ```
 
 Within `scan_interval_sec` the service appears in the dashboard and in:
@@ -197,7 +197,7 @@ When an agent is told to "dock into dashy":
 1. `GET http://localhost:7800/api/dock` — read `scan_roots` and `scan_interval_sec`.
 2. Check whether the project root is under a `scan_root`. If not, POST to add it.
 3. Determine all services the project runs (ports, pid files, start commands).
-4. Write `devdash.json` to the project or worktree root following the schema above.
+4. Write `dashy.json` to the project or worktree root following the schema above.
 5. `POST /api/dock/validate` with `_source_hint` set — fix any errors.
 6. Commit the file.
 7. Verify: `curl http://localhost:7800/api/services | jq '.[] | select(.project=="<name>") | {id,status}'`
