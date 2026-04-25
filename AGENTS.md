@@ -11,7 +11,7 @@ committed to each project/worktree root.
 - Never commit or push unprompted.
 - Always use `YYYY-MM-DD` date format.
 - stdlib Python only — no third-party packages, no build step.
-- `server.py` runs as the `ubuntu` user (systemd service); write code accordingly.
+- `server.py` runs as the `agent` user (systemd service); write code accordingly.
 - Never paste live secrets, credentials, or PII into any file.
 - No env handling in `server.py` — start commands in `dashy.json` are self-contained.
 
