@@ -358,7 +358,8 @@ def _merge_status(svc: dict) -> None:
         sd = _systemd_info(unit)
         svc["_systemd"] = sd
         warns = []
-        if sd["restart_policy"] == "always":
+        effective_pol = _restart_policy_overrides.get(svc["id"]) or sd["restart_policy"]
+        if effective_pol == "always":
             warns.append(
                 f"Restart=always on '{unit}' — stop may not stick (change to on-failure)"
             )
