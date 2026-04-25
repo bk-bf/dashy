@@ -298,13 +298,32 @@ def action_stop(svc: dict) -> dict:
 
     if stop_cmd:
         _log(sid, f"[dashy] stopping via stop_cmd: {stop_cmd}")
-        try:
-            subprocess.run(stop_cmd, shell=True, timeout=15)
-            return {"ok": True, "message": "stopped via stop_cmd"}
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "message": "stop_cmd timed out"}
-        except Exception as e:
-            return {"ok": False, "message": str(e)}
+
+        def _run_stop():
+            try:
+                proc = subprocess.run(
+                    stop_cmd,
+                    shell=True,
+                    timeout=15,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in (proc.stdout or "").splitlines():
+                    _log(sid, line)
+                if proc.returncode != 0:
+                    _log(sid, f"[dashy] stop_cmd exited {proc.returncode}")
+                else:
+                    _log(sid, "[dashy] stopped")
+            except subprocess.TimeoutExpired:
+                _log(sid, "[dashy] stop_cmd timed out after 15s")
+            except Exception as e:
+                _log(sid, f"[dashy] stop_cmd error: {e}")
+            finally:
+                _refresh_status(sid)
+
+        threading.Thread(target=_run_stop, daemon=True).start()
+        return {"ok": True, "message": "stop_cmd dispatched"}
 
     pid_info = check_pid(pid_file)
     if not pid_info["alive"]:
