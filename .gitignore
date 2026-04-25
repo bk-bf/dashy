@@ -1,0 +1,12 @@
+# local machine config — not committed
+config.json
+
+# python cache
+__pycache__/
+*.pyc
+
+# ruff cache
+.ruff_cache/
+
+# old unit file
+dev-dashboard.service

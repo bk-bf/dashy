@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dashy</title>
+<style>
+:root {
+  --bg:        #0d0d0f;
+  --surface:   #16181d;
+  --border:    #26292f;
+  --muted:     #4a4f5a;
+  --text:      #d4d8e2;
+  --dim:       #7a8090;
+  --green:     #3dd68c;   --green-bg:  #0e2a1c;
+  --blue:      #4f9cf9;   --blue-bg:   #0d1e38;
+  --amber:     #f0a050;   --amber-bg:  #2a1d08;
+  --red:       #f46060;   --red-bg:    #2a0e0e;
+  --pulse-col: #4f9cf933;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+#shell { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── header ── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 20px 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  z-index: 10;
+  position: relative;
+}
+
+.logo { font-size: 14px; font-weight: 700; letter-spacing: .08em; flex-shrink: 0; }
+.logo span { color: var(--blue); }
+
+.header-meta { display: flex; gap: 12px; align-items: center; margin-left: auto; }
+
+select.hdr-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 24px 3px 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a4f5a'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+}
+select.hdr-select:focus { border-color: var(--blue); color: var(--text); }
+select.hdr-select option { background: #1a1c22; }
+
+.icon-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: .04em;
+  padding: 3px 9px;
+  transition: color .12s, border-color .12s, background .12s;
+  flex-shrink: 0;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--muted); background: var(--surface); }
+.icon-btn.active { color: var(--blue); border-color: var(--blue); background: var(--blue-bg); }
+
+.live-indicator { display: flex; align-items: center; gap: 5px; }
+.live-label { font-size: 10px; letter-spacing: .06em; color: var(--muted); }
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green); flex-shrink: 0; transition: background .2s;
+}
+.live-dot.amber  { background: var(--amber); }
+.live-dot.red    { background: var(--red);   }
+.live-dot.pulse  { animation: live-pulse .5s ease-out forwards; }
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 #3dd68c88; background: #6fffa8; }
+  60%  { box-shadow: 0 0 0 5px #3dd68c00; }
+  100% { box-shadow: 0 0 0 0 transparent; background: var(--green); }
+}
+
+/* ── content ── */
+#content { flex: 1; overflow-y: auto; overflow-x: hidden; }
+
+/* ── project sections ── */
+.project-section { border-bottom: 1px solid var(--border); }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px 9px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.section-project { font-size: 11px; font-weight: 700; letter-spacing: .07em; color: var(--text); text-transform: uppercase; }
+.section-meta { font-size: 10px; color: var(--muted); }
+.section-running { color: var(--green); font-weight: 700; }
+
+/* ── service table ── */
+.service-table { width: 100%; border-collapse: collapse; }
+.service-table thead th {
+  padding: 6px 16px;
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-weight: 600;
+}
+.service-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .1s;
+}
+.service-table tbody tr:hover { background: var(--surface); }
+.service-table tbody tr:hover .row-actions { opacity: 1; }
+.service-table tbody tr:last-child { border-bottom: none; }
+.service-table td {
+  padding: 9px 16px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.col-name   { color: var(--text); font-weight: 600; max-width: 220px; }
+.col-port   { color: var(--dim); width: 80px; }
+.col-status { width: 110px; }
+.col-wt     { color: var(--dim); max-width: 180px; }
+.col-uptime { color: var(--dim); width: 100px; }
+.col-actions{ width: 120px; }
+
+/* ── status badge ── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.badge-running  { background: var(--green-bg);  color: var(--green); }
+.badge-starting { background: var(--amber-bg);  color: var(--amber); }
+.badge-stopped  { background: #1e2028;          color: var(--muted); }
+.badge-zombie   { background: var(--red-bg);    color: var(--red);   }
+.badge-error    { background: var(--red-bg);    color: var(--red);   }
+
+/* ── row action buttons ── */
+.row-actions { opacity: 0; display: flex; gap: 6px; transition: opacity .12s; }
+.act-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color .1s, border-color .1s, background .1s;
+}
+.act-btn:hover { color: var(--text); border-color: var(--muted); background: var(--surface); }
+.act-btn.start:hover  { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.act-btn.stop:hover   { color: var(--red);   border-color: var(--red);   background: var(--red-bg);   }
+.act-btn.restart:hover{ color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+
+/* ── empty state ── */
+.empty-state {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+.empty-state code { color: var(--blue); }
+
+/* ── log panel (draggable overlay from bottom) ── */
+#log-panel {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 50;
+  background: var(--surface);
+  border-top: 2px solid var(--blue);
+  box-shadow: 0 -8px 40px rgba(0,0,0,.7);
+  display: none;
+  flex-direction: column;
+  min-height: 120px;
+}
+#log-panel.open { display: flex; }
+#log-resize-handle {
+  height: 4px; cursor: ns-resize; background: transparent; flex-shrink: 0; transition: background .15s;
+}
+#log-resize-handle:hover, #log-resize-handle.dragging { background: var(--blue); }
+.log-panel-hdr {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0d1628;
+}
+.log-panel-hdr-title { color: var(--blue); }
+#log-content {
+  padding: 8px 14px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  overflow-y: auto;
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #8a9ab0;
+}
+#log-content .log-line { display: block; }
+#log-content .log-dashy { color: var(--dim); }
+
+/* ── confirm modal ── */
+#modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 70;
+  align-items: center;
+  justify-content: center;
+}
+#modal-overlay.open { display: flex; }
+#modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 24px 28px;
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.8);
+}
+#modal-box h3 { font-size: 13px; color: var(--text); margin-bottom: 10px; }
+#modal-box p  { font-size: 12px; color: var(--dim); margin-bottom: 20px; line-height: 1.6; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.modal-btn {
+  background: none; border: 1px solid var(--border); color: var(--muted);
+  font-family: inherit; font-size: 11px; padding: 5px 16px; cursor: pointer;
+  transition: color .1s, border-color .1s, background .1s;
+}
+.modal-btn:hover { color: var(--text); border-color: var(--muted); background: #222; }
+.modal-btn.confirm { color: var(--red); border-color: var(--red); }
+.modal-btn.confirm:hover { background: var(--red-bg); }
+
+/* ── add-root drawer ── */
+#root-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 340px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 40px rgba(0,0,0,.6);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform .2s ease;
+}
+#root-drawer.open { transform: translateX(0); }
+#root-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.35);
+}
+#root-backdrop.open { display: block; }
+.drawer-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 16px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.drawer-hdr-title { font-size: 11px; font-weight: 700; letter-spacing: .07em; color: var(--dim); text-transform: uppercase; }
+.drawer-body { padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.drawer-label { font-size: 10px; letter-spacing: .05em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+.drawer-input {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font-family: inherit; font-size: 12px; padding: 7px 10px; width: 100%; outline: none;
+}
+.drawer-input:focus { border-color: var(--blue); }
+#autocomplete-list { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
+.ac-item {
+  padding: 5px 8px; font-size: 11px; color: var(--dim); cursor: pointer;
+  border: 1px solid transparent; transition: color .1s;
+}
+.ac-item:hover { color: var(--text); border-color: var(--border); background: var(--bg); }
+.drawer-actions { display: flex; gap: 10px; }
+.drawer-btn {
+  background: none; border: 1px solid var(--border); color: var(--muted);
+  font-family: inherit; font-size: 11px; padding: 6px 16px; cursor: pointer;
+  transition: color .1s, border-color .1s, background .1s;
+}
+.drawer-btn:hover { color: var(--text); border-color: var(--muted); background: #222; }
+.drawer-btn.primary { color: var(--blue); border-color: var(--blue); }
+.drawer-btn.primary:hover { background: var(--blue-bg); }
+.drawer-status { font-size: 10px; color: var(--muted); min-height: 14px; }
+
+/* ── scan roots list ── */
+.roots-list { display: flex; flex-direction: column; gap: 4px; }
+.root-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 8px; border: 1px solid var(--border); font-size: 11px;
+}
+.root-item span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.root-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 0 2px; flex-shrink: 0; }
+.root-remove:hover { color: var(--red); }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); }
+</style>
+</head>
+<body>
+<div id="shell">
+
+  <header>
+    <div class="logo">da<span>shy</span></div>
+    <select class="hdr-select" id="project-filter" onchange="applyFilter()">
+      <option value="">all projects</option>
+    </select>
+    <select class="hdr-select" id="interval-select" onchange="applyInterval()">
+      <option value="5">refresh: 5s</option>
+      <option value="30">refresh: 30s</option>
+      <option value="0">refresh: off</option>
+    </select>
+    <div class="header-meta">
+      <button class="icon-btn" onclick="openRootDrawer()">+ scan root</button>
+      <div class="live-indicator">
+        <div class="live-dot" id="live-dot"></div>
+        <span class="live-label" id="live-label">live</span>
+      </div>
+    </div>
+  </header>
+
+  <div id="content">
+    <div class="empty-state" id="empty-state" style="display:none">
+      No services found. Add a <code>devdash.json</code> to a project under a scan root,<br>
+      or add a new scan root with <code>+ scan root</code>.
+    </div>
+  </div>
+
+</div>
+
+<!-- log panel -->
+<div id="log-panel">
+  <div id="log-resize-handle"></div>
+  <div class="log-panel-hdr">
+    <span class="log-panel-hdr-title" id="log-panel-title">log</span>
+    <button class="icon-btn" onclick="closeLogPanel()">✕ close</button>
+  </div>
+  <div id="log-content"><span style="color:var(--muted)">loading…</span></div>
+</div>
+
+<!-- confirm modal -->
+<div id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div id="modal-box">
+    <h3 id="modal-title"></h3>
+    <p id="modal-body"></p>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeModal()">cancel</button>
+      <button class="modal-btn confirm" id="modal-confirm-btn">confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- add-root drawer -->
+<div id="root-backdrop" onclick="closeRootDrawer()"></div>
+<div id="root-drawer">
+  <div class="drawer-hdr">
+    <span class="drawer-hdr-title">scan roots</span>
+    <button class="icon-btn" onclick="closeRootDrawer()">✕ close</button>
+  </div>
+  <div class="drawer-body">
+    <div>
+      <div class="drawer-label">current roots</div>
+      <div class="roots-list" id="roots-list"></div>
+    </div>
+    <div>
+      <div class="drawer-label">add root</div>
+      <input class="drawer-input" id="root-input" type="text" placeholder="/home/ubuntu/server/…"
+        oninput="onRootInput()" onkeydown="onRootKey(event)" autocomplete="off" spellcheck="false">
+      <div id="autocomplete-list" style="margin-top:4px"></div>
+    </div>
+    <div class="drawer-actions">
+      <button class="drawer-btn primary" onclick="addRoot()">add</button>
+      <button class="drawer-btn" onclick="closeRootDrawer()">cancel</button>
+    </div>
+    <div class="drawer-status" id="drawer-status"></div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let services = [];
+let evtSource = null;
+let pollTimer = null;
+let logRefreshTimer = null;
+let activeServiceId = null;
+let logPanelTop = null;
+let refreshInterval = 5;
+
+// ── SSE / polling ─────────────────────────────────────────────────────────────
+function connectSSE() {
+  if (evtSource) { evtSource.close(); evtSource = null; }
+  clearInterval(pollTimer);
+  if (refreshInterval === 0) { setLive('off'); return; }
+
+  try {
+    evtSource = new EventSource('/api/events');
+    evtSource.addEventListener('services.updated', e => {
+      services = JSON.parse(e.data);
+      render();
+      pulseDot();
+    });
+    evtSource.onerror = () => {
+      evtSource.close(); evtSource = null;
+      setLive('amber');
+      startPolling();
+    };
+    setLive('green');
+  } catch {
+    startPolling();
+  }
+}
+
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    await fetchServices();
+  }, refreshInterval * 1000);
+  fetchServices();
+}
+
+async function fetchServices() {
+  try {
+    const r = await fetch('/api/services');
+    if (!r.ok) throw new Error(r.status);
+    services = await r.json();
+    render();
+    pulseDot();
+    setLive('amber'); // polling, not SSE
+  } catch {
+    setLive('red');
+  }
+}
+
+function applyInterval() {
+  refreshInterval = parseInt(document.getElementById('interval-select').value);
+  if (evtSource) { evtSource.close(); evtSource = null; }
+  clearInterval(pollTimer);
+  if (refreshInterval === 0) { setLive('off'); return; }
+  connectSSE();
+}
+
+// ── Live dot ──────────────────────────────────────────────────────────────────
+function setLive(state) {
+  const dot = document.getElementById('live-dot');
+  const lbl = document.getElementById('live-label');
+  dot.classList.remove('amber', 'red', 'pulse');
+  if (state === 'green') { lbl.textContent = 'live'; }
+  else if (state === 'amber') { dot.classList.add('amber'); lbl.textContent = 'polling'; }
+  else if (state === 'red')   { dot.classList.add('red');   lbl.textContent = 'offline'; }
+  else { dot.classList.add('amber'); lbl.textContent = 'off'; }
+}
+
+function pulseDot() {
+  const dot = document.getElementById('live-dot');
+  dot.classList.remove('pulse');
+  void dot.offsetWidth;
+  dot.classList.add('pulse');
+  setTimeout(() => dot.classList.remove('pulse'), 600);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtUptime(sec) {
+  if (sec == null) return '—';
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+  return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+}
+
+function statusBadge(status) {
+  return `<span class="badge badge-${status}">${status}</span>`;
+}
+
+function render() {
+  const content = document.getElementById('content');
+  const empty   = document.getElementById('empty-state');
+  const filter  = document.getElementById('project-filter').value;
+
+  // Rebuild project filter dropdown (preserve selection)
+  const projects = [...new Set(services.map(s => s.project).filter(Boolean))].sort();
+  const pfSel = document.getElementById('project-filter');
+  const prevVal = pfSel.value;
+  pfSel.innerHTML = '<option value="">all projects</option>' +
+    projects.map(p => `<option value="${escHtml(p)}" ${p===prevVal?'selected':''}>${escHtml(p)}</option>`).join('');
+
+  if (services.length === 0) {
+    content.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  // Group by project
+  const groups = {};
+  for (const svc of services) {
+    const p = svc.project || '(unknown)';
+    (groups[p] = groups[p] || []).push(svc);
+  }
+
+  let html = '';
+  for (const [project, svcs] of Object.entries(groups)) {
+    if (filter && project !== filter) continue;
+    const runCount = svcs.filter(s => s.status === 'running').length;
+    const runHtml  = runCount > 0 ? `<span class="section-running">${runCount} running</span>` : '';
+    const wtCount  = new Set(svcs.map(s => s.worktree).filter(Boolean)).size;
+    const metaParts = [];
+    if (wtCount) metaParts.push(`${wtCount} worktree${wtCount>1?'s':''}`);
+    metaParts.push(`${svcs.length} service${svcs.length>1?'s':''}`);
+
+    html += `<div class="project-section" id="section-${escHtml(project)}">
+  <div class="section-header">
+    <span class="section-project">${escHtml(project)}</span>
+    <span class="section-meta">${metaParts.join(' · ')}</span>
+    ${runHtml}
+  </div>
+  <table class="service-table">
+    <thead><tr>
+      <th>Name</th><th>Port</th><th>Status</th><th>Worktree</th><th>Uptime</th><th>Actions</th>
+    </tr></thead>
+    <tbody>
+    ${svcs.map(s => renderRow(s)).join('')}
+    </tbody>
+  </table>
+</div>`;
+  }
+
+  content.innerHTML = html;
+}
+
+function renderRow(svc) {
+  const sid = escHtml(svc.id);
+  return `<tr onclick="openLogPanel('${sid}')" id="row-${sid}">
+  <td class="col-name" title="${escHtml(svc.name)}">${escHtml(svc.name)}</td>
+  <td class="col-port">${svc.port ? escHtml(String(svc.port)) : '—'}</td>
+  <td class="col-status">${statusBadge(svc.status || 'stopped')}</td>
+  <td class="col-wt" title="${escHtml(svc.worktree||'')}">${svc.worktree ? escHtml(svc.worktree) : '<span style="color:var(--muted)">main</span>'}</td>
+  <td class="col-uptime">${fmtUptime(svc.uptime_sec)}</td>
+  <td class="col-actions" onclick="event.stopPropagation()">
+    <div class="row-actions">
+      <button class="act-btn start"   onclick="doAction('${sid}','start')"   title="Start">▶</button>
+      <button class="act-btn stop"    onclick="confirmAction('${sid}','stop')"    title="Stop">■</button>
+      <button class="act-btn restart" onclick="confirmAction('${sid}','restart')" title="Restart">↺</button>
+    </div>
+  </td>
+</tr>`;
+}
+
+function applyFilter() { render(); }
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+let pendingAction = null;
+
+function confirmAction(id, action) {
+  const svc = services.find(s => s.id === id);
+  const name = svc ? svc.name : id;
+  pendingAction = { id, action };
+  document.getElementById('modal-title').textContent =
+    action === 'restart' ? `Restart "${name}"?` : `Stop "${name}"?`;
+  document.getElementById('modal-body').textContent =
+    action === 'restart'
+      ? `This will stop then start the service.`
+      : `The running process will be terminated.`;
+  document.getElementById('modal-confirm-btn').textContent = action;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  pendingAction = null;
+}
+
+document.getElementById('modal-confirm-btn').addEventListener('click', () => {
+  if (!pendingAction) return;
+  doAction(pendingAction.id, pendingAction.action);
+  closeModal();
+});
+
+async function doAction(id, action) {
+  try {
+    await fetch(`/api/services/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+    // Refresh after a short delay to pick up status change
+    setTimeout(fetchServices, 800);
+  } catch (e) {
+    console.error('action failed', e);
+  }
+}
+
+// ── Log panel ─────────────────────────────────────────────────────────────────
+async function openLogPanel(id) {
+  activeServiceId = id;
+  const svc = services.find(s => s.id === id);
+  document.getElementById('log-panel-title').textContent = svc ? svc.name : id;
+  document.getElementById('log-panel').classList.add('open');
+
+  // Position panel
+  const hdrH = document.querySelector('header').offsetHeight;
+  if (logPanelTop === null) logPanelTop = Math.max(hdrH, window.innerHeight * 0.55);
+  document.getElementById('log-panel').style.top = logPanelTop + 'px';
+
+  await refreshLog();
+  clearInterval(logRefreshTimer);
+  logRefreshTimer = setInterval(refreshLog, 3000);
+}
+
+async function refreshLog() {
+  if (!activeServiceId) return;
+  try {
+    const r = await fetch(`/api/services/${encodeURIComponent(activeServiceId)}/log`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const el = document.getElementById('log-content');
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = data.lines.length
+      ? data.lines.map(l => `<span class="log-line${l.startsWith('[dashy]') ? ' log-dashy' : ''}">${escHtml(l)}</span>`).join('\n')
+      : '<span style="color:var(--muted)">no output yet</span>';
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  } catch {}
+}
+
+function closeLogPanel() {
+  document.getElementById('log-panel').classList.remove('open');
+  activeServiceId = null;
+  clearInterval(logRefreshTimer);
+}
+
+// Log panel drag resize
+(function() {
+  let dragging = false, startY = 0, startTop = 0;
+  const handle = document.getElementById('log-resize-handle');
+  const panel  = document.getElementById('log-panel');
+  handle.addEventListener('mousedown', e => {
+    dragging = true; startY = e.clientY;
+    startTop = panel.getBoundingClientRect().top;
+    handle.classList.add('dragging');
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const newTop = Math.max(60, Math.min(window.innerHeight - 120, startTop + (e.clientY - startY)));
+    panel.style.top = newTop + 'px';
+    logPanelTop = newTop;
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.userSelect = '';
+  });
+})();
+
+// ── Add-root drawer ───────────────────────────────────────────────────────────
+async function openRootDrawer() {
+  await loadRoots();
+  document.getElementById('root-drawer').classList.add('open');
+  document.getElementById('root-backdrop').classList.add('open');
+  document.getElementById('root-input').value = '';
+  document.getElementById('autocomplete-list').innerHTML = '';
+  document.getElementById('drawer-status').textContent = '';
+}
+
+function closeRootDrawer() {
+  document.getElementById('root-drawer').classList.remove('open');
+  document.getElementById('root-backdrop').classList.remove('open');
+}
+
+async function loadRoots() {
+  try {
+    const r = await fetch('/api/config');
+    const cfg = await r.json();
+    const roots = cfg.scan_roots || [];
+    document.getElementById('roots-list').innerHTML = roots.length
+      ? roots.map(root => `
+          <div class="root-item">
+            <span title="${escHtml(root)}">${escHtml(root)}</span>
+            <button class="root-remove" onclick="removeRoot('${escHtml(root)}')" title="Remove">✕</button>
+          </div>`).join('')
+      : '<span style="color:var(--muted);font-size:11px">none</span>';
+  } catch {}
+}
+
+async function removeRoot(root) {
+  await fetch('/api/config/scan_roots', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ action: 'remove', root })
+  });
+  await loadRoots();
+}
+
+async function addRoot() {
+  const root = document.getElementById('root-input').value.trim();
+  const status = document.getElementById('drawer-status');
+  if (!root) return;
+  try {
+    const r = await fetch('/api/config/scan_roots', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action: 'add', root })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      status.style.color = 'var(--green)';
+      status.textContent = 'added';
+      document.getElementById('root-input').value = '';
+      document.getElementById('autocomplete-list').innerHTML = '';
+      await loadRoots();
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    } else {
+      status.style.color = 'var(--red)';
+      status.textContent = data.message || 'error';
+    }
+  } catch (e) {
+    status.style.color = 'var(--red)';
+    status.textContent = String(e);
+  }
+}
+
+let acTimer = null;
+function onRootInput() {
+  clearTimeout(acTimer);
+  acTimer = setTimeout(fetchAutocomplete, 120);
+}
+
+function onRootKey(e) {
+  if (e.key === 'Enter') addRoot();
+}
+
+async function fetchAutocomplete() {
+  const q = document.getElementById('root-input').value;
+  if (!q) { document.getElementById('autocomplete-list').innerHTML = ''; return; }
+  try {
+    const r = await fetch(`/api/fs/dirs?q=${encodeURIComponent(q)}`);
+    const dirs = await r.json();
+    document.getElementById('autocomplete-list').innerHTML = dirs
+      .map(d => `<div class="ac-item" onclick="selectAc('${escHtml(d)}')">${escHtml(d)}</div>`)
+      .join('');
+  } catch {}
+}
+
+function selectAc(path) {
+  document.getElementById('root-input').value = path;
+  document.getElementById('autocomplete-list').innerHTML = '';
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+connectSSE();
+</script>
+</body>
+</html>

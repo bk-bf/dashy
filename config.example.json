@@ -1,0 +1,9 @@
+{
+  "port": 7800,
+  "scan_roots": [
+    "/home/youruser/server/my-project"
+  ],
+  "scan_max_depth": 4,
+  "scan_exclude": ["node_modules", ".venv", "build", "dist", "__pycache__", ".git"],
+  "scan_interval_sec": 10
+}
