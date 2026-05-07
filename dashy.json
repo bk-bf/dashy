@@ -1,0 +1,14 @@
+{
+  "project": "dashy",
+  "services": [
+    {
+      "id": "dashy-control-plane",
+      "name": "dashy control plane",
+      "port": 7800,
+      "start_cmd": "sudo systemctl restart dashy",
+      "stop_cmd": "sudo systemctl stop dashy",
+      "restart_policy": "on-failure",
+      "cwd": "/home/ubuntu/server/dashy"
+    }
+  ]
+}

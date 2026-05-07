@@ -354,7 +354,9 @@ def _merge_status(svc: dict) -> None:
     elif alive and port_bound:
         status = "running"
     elif alive and not port_bound:
-        status = "starting"
+        # No port configured → pid being alive is sufficient to declare running.
+        # Port configured but not yet bound → still starting up.
+        status = "running" if svc.get("port") is None else "starting"
     elif not alive and not port_bound and stale:
         status = "error"
     elif not alive and port_bound:
@@ -430,11 +432,25 @@ def _log(sid: str, line: str) -> None:
         _logs[sid].append(line)
 
 
-def _stream_output(sid: str, proc: subprocess.Popen) -> None:
+def _stream_output(sid: str, proc: subprocess.Popen, log_file: str | None = None) -> None:
     """Read proc stdout into the ring buffer until EOF."""
+    log_fh = None
+    if log_file:
+        try:
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            log_fh = open(log_file, "a", buffering=1)
+        except Exception as e:
+            _log(sid, f"[dashy] could not open log_file: {e}")
     for raw in proc.stdout:
-        _log(sid, raw.rstrip("\n"))
-    proc.wait()
+        line = raw.rstrip("\n")
+        _log(sid, line)
+        if log_fh:
+            print(line, file=log_fh)
+    try:
+        proc.wait()
+    finally:
+        if log_fh:
+            log_fh.close()
 
 
 def action_start(svc: dict) -> dict:
@@ -442,11 +458,19 @@ def action_start(svc: dict) -> dict:
     _intentional_stops.discard(sid)
     start_cmd = svc.get("start_cmd")
     cwd = svc.get("cwd")
+    log_file = svc.get("log_file")
     if not start_cmd:
         return {"ok": False, "message": "no start_cmd defined"}
     with _logs_lock:
         _logs[sid] = collections.deque(maxlen=LOG_MAXLINES)
     _log(sid, f"[dashy] starting: {start_cmd}")
+    if log_file:
+        try:
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            with open(log_file, "a") as f:
+                print(f"[dashy] starting: {start_cmd}", file=f)
+        except Exception as e:
+            _log(sid, f"[dashy] could not write log_file: {e}")
     try:
         proc = subprocess.Popen(
             start_cmd,
@@ -457,7 +481,9 @@ def action_start(svc: dict) -> dict:
             text=True,
             preexec_fn=os.setsid,  # new process group — isolates from dashy
         )
-        t = threading.Thread(target=_stream_output, args=(sid, proc), daemon=True)
+        t = threading.Thread(
+            target=_stream_output, args=(sid, proc, log_file), daemon=True
+        )
         t.start()
         _shell_pids[sid] = proc.pid
         return {"ok": True, "message": "started"}
@@ -544,6 +570,33 @@ def action_stop(svc: dict) -> dict:
         if not stop_cmd_succeeded and port and check_port(port):
             _kill_port(sid, port)
 
+        # For port-less, non-systemd services: kill by pid_file PID and its
+        # children (process group). This is the only kill path when port=null.
+        if not stop_cmd_succeeded and not port and pid_file:
+            pid_info = check_pid(pid_file)
+            if pid_info["alive"] and pid_info["pid"]:
+                pid = pid_info["pid"]
+                _log(sid, f"[dashy] killing pid-file process group pgid={pid}")
+                try:
+                    # Kill the entire process group (negative PID = group)
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, OSError):
+                    # Fallback: kill just the tracked PID
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                time.sleep(2)
+                # SIGKILL any survivors
+                if check_pid(pid_file)["alive"]:
+                    try:
+                        os.killpg(os.getpgid(pid), signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError):
+                            pass
+
         _cleanup_pid_file()
         _refresh_status(sid)
 
@@ -593,10 +646,104 @@ def action_set_restart(svc: dict, policy: str) -> dict:
 
 
 def action_restart(svc: dict) -> dict:
-    stop_result = action_stop(svc)
-    _log(svc["id"], f"[dashy] restart: stop → {stop_result['message']}")
-    time.sleep(0.5)
-    return action_start(svc)
+    """Restart a service without racing an async stop against start.
+
+    For systemd-managed services, use systemd's native restart transaction.
+    For dashy-managed services, run the stop/start sequence inside one worker
+    and wait for the port or pid_file to settle before starting again.
+    """
+    sid = svc["id"]
+    unit = _systemd_unit(svc)
+
+    if unit:
+        _intentional_stops.discard(sid)
+        _log(sid, f"[dashy] systemd restart: {unit}")
+
+        def _do_systemd_restart():
+            try:
+                result = subprocess.run(
+                    ["sudo", "systemctl", "restart", unit],
+                    timeout=30,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in (result.stdout or "").splitlines():
+                    _log(sid, line)
+                if result.returncode != 0:
+                    _log(sid, f"[dashy] systemctl restart exited {result.returncode}")
+            except subprocess.TimeoutExpired:
+                _log(sid, "[dashy] systemctl restart timed out")
+            except Exception as e:
+                _log(sid, f"[dashy] systemctl restart error: {e}")
+            _refresh_status(sid)
+
+        threading.Thread(target=_do_systemd_restart, daemon=True).start()
+        return {"ok": True, "message": "restarting"}
+
+    def _do_restart():
+        stop_cmd = svc.get("stop_cmd")
+        pid_file = svc.get("pid_file")
+        port = svc.get("port")
+        _intentional_stops.add(sid)
+        _shell_pids.pop(sid, None)
+        _log(sid, "[dashy] restarting")
+
+        if stop_cmd:
+            _log(sid, f"[dashy] stop_cmd: {stop_cmd}")
+            try:
+                result = subprocess.run(
+                    stop_cmd,
+                    shell=True,
+                    timeout=15,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in (result.stdout or "").splitlines():
+                    _log(sid, line)
+                if result.returncode != 0:
+                    _log(sid, f"[dashy] stop_cmd exited {result.returncode}")
+            except subprocess.TimeoutExpired:
+                _log(sid, "[dashy] stop_cmd timed out")
+            except Exception as e:
+                _log(sid, f"[dashy] stop_cmd error: {e}")
+
+        if port and check_port(port):
+            _kill_port(sid, port)
+
+        if not port and pid_file:
+            pid_info = check_pid(pid_file)
+            if pid_info["alive"] and pid_info["pid"]:
+                pid = pid_info["pid"]
+                _log(sid, f"[dashy] killing pid-file process group pgid={pid}")
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, OSError):
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+
+        for _ in range(50):
+            pid_alive = bool(pid_file and check_pid(pid_file)["alive"])
+            port_alive = bool(port and check_port(port))
+            if not pid_alive and not port_alive:
+                break
+            time.sleep(0.1)
+
+        if pid_file:
+            try:
+                os.remove(pid_file)
+            except FileNotFoundError:
+                pass
+        _intentional_stops.discard(sid)
+        action_start(svc)
+        time.sleep(1.5)
+        _refresh_status(sid)
+
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return {"ok": True, "message": "restarting"}
 
 
 # ---------------------------------------------------------------------------

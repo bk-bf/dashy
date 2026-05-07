@@ -53,11 +53,11 @@ curl -s http://localhost:7800/api/dock | jq '.'
 
 Key fields in the response:
 
-| Field | Meaning |
-|---|---|
-| `scan_roots` | Directories dashy watches. Your project must be under one of these. |
-| `scan_max_depth` | How deep under each root dashy walks. |
-| `scan_interval_sec` | How long until dashy picks up a new file (max wait). |
+| Field               | Meaning                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `scan_roots`        | Directories dashy watches. Your project must be under one of these. |
+| `scan_max_depth`    | How deep under each root dashy walks.                               |
+| `scan_interval_sec` | How long until dashy picks up a new file (max wait).                |
 
 If your project root is **not** under any `scan_root`, add it:
 
@@ -91,21 +91,43 @@ curl -s -X POST http://localhost:7800/api/config/scan_roots \
 
 ### Field rules
 
-| Field | Required | Notes |
-|---|---|---|
-| `project` | yes | Shared across all worktrees of the same project. Used for grouping in the UI. |
-| `worktree` | no | Omit or `null` for the main branch. |
-| `services[].id` | yes | **Globally unique** across all projects. Convention: `<project>-<worktree>-<role>`. For main: `<project>-<role>`. |
-| `services[].name` | yes | Human-readable label shown in the dashboard. |
-| `services[].start_cmd` | yes | Fully self-contained shell string. Dashy runs it with `shell=True` as the current process user (`ubuntu`). Scripts must source their own `.env`. |
-| `services[].cwd` | yes | Absolute path. Working directory for `start_cmd`. |
-| `services[].port` | no | Used for liveness checks. Omit if the service doesn't bind a port. |
-| `services[].pid_file` | no | Absolute path. Written by `start_cmd`; may not exist yet (stopped state). Required if `stop_cmd` is null. |
-| `services[].stop_cmd` | no | Shell string. `null` → dashy kills via `pid_file` (SIGTERM → 5 s → SIGKILL). |
-| `services[].log_file` | no | Absolute path to a log file. Shown in the dashboard log panel when the process was **not** started by dashy (e.g. systemd-managed or externally started). dashy reads the last 200 lines. Ignored if dashy holds an in-memory ring buffer for the process. |
-| `services[].restart_policy` | no | `"no"` · `"on-failure"` · `"always"`. **systemd-managed services only.** dashy auto-applies this via a dropin on discovery. See below. |
+| Field                       | Required | Notes                                                                                                                                                                                                                                                      |
+| --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`                   | yes      | Shared across all worktrees of the same project. Used for grouping in the UI.                                                                                                                                                                              |
+| `worktree`                  | no       | Omit or `null` for the main branch.                                                                                                                                                                                                                        |
+| `services[].id`             | yes      | **Globally unique** across all projects. Convention: `<project>-<worktree>-<role>`. For main: `<project>-<role>`.                                                                                                                                          |
+| `services[].name`           | yes      | Human-readable label shown in the dashboard.                                                                                                                                                                                                               |
+| `services[].start_cmd`      | yes      | Fully self-contained shell string. Dashy runs it with `shell=True` as the current process user (`ubuntu`). Scripts must source their own `.env`.                                                                                                           |
+| `services[].cwd`            | yes      | Absolute path. Working directory for `start_cmd`.                                                                                                                                                                                                          |
+| `services[].port`           | no       | Used for liveness checks. Omit if the service doesn't bind a port.                                                                                                                                                                                         |
+| `services[].pid_file`       | no       | Absolute path. Written by `start_cmd`; may not exist yet (stopped state). Required if `stop_cmd` is null.                                                                                                                                                  |
+| `services[].stop_cmd`       | no       | Shell string. `null` → dashy kills via `pid_file` (SIGTERM → 5 s → SIGKILL).                                                                                                                                                                               |
+| `services[].log_file`       | no       | Absolute path to a log file. Shown in the dashboard log panel when the process was **not** started by dashy (e.g. systemd-managed or externally started). dashy reads the last 200 lines. Ignored if dashy holds an in-memory ring buffer for the process. |
+| `services[].restart_policy` | no       | `"no"` · `"on-failure"` · `"always"`. **systemd-managed services only.** dashy auto-applies this via a dropin on discovery. See below.                                                                                                                     |
 
 > **Network binding**: dashy's status check only tests whether the port is bound — it does not distinguish `127.0.0.1` from `0.0.0.0`. If the service needs to be reachable from outside localhost (e.g. over Tailscale), ensure `start_cmd` launches the server bound to `0.0.0.0` or the appropriate interface. For vite: set `host: '0.0.0.0'` and `allowedHosts: ['your-hostname']` in `vite.config.ts`, or pass `--host` on the command line.
+
+### Common start_cmd patterns
+
+**SvelteKit dev server — wipe generated files on restart**
+
+SvelteKit generates files in `.svelte-kit/` at startup. If any of those files were
+previously written by a different user (e.g. root from a one-off `sudo svelte-kit sync`
+or a stale session), Vite will fail with `EACCES: permission denied` when it tries to
+overwrite them. The fix is to delete `.svelte-kit/` at the start of every restart —
+it is always fully regenerated on boot and safe to wipe.
+
+```json
+"start_cmd": "rm -rf apps/web/.svelte-kit && env MY_PORT=5175 pnpm run dev:web"
+```
+
+Adjust the path relative to `cwd` to wherever `.svelte-kit/` lives (typically
+`apps/web/.svelte-kit` for a pnpm workspace or `.svelte-kit` for a flat layout).
+
+This is safe to include unconditionally — the wipe is instantaneous and
+`svelte-kit sync` runs automatically as part of `pnpm run dev`.
+
+---
 
 ### Multi-service example (API + worker pair)
 
@@ -173,11 +195,11 @@ and auto-restarts the process if it stopped unexpectedly.
 `stopped` or `error`, **and** dashy did not initiate the stop. Clicking the Stop
 button always suppresses auto-restart regardless of policy.
 
-| Value | Systemd behaviour | Dashy-started behaviour | When to use |
-|---|---|---|---|
-| `"no"` | **Recommended default.** systemd never auto-restarts. | dashy never auto-restarts. | Dev services, anything dashy fully controls. |
-| `"on-failure"` | Restarts on crash (non-zero exit). Respects `systemctl stop`. | dashy restarts when status transitions `running → error`. | Services that should survive crashes but stay stopped when intentionally stopped. |
-| `"always"` | Restarts after any exit including clean stop. **Stop button will not work reliably.** | dashy restarts on any unexpected stop (`running → stopped` or `error`). | Use with care; avoid for dev services. |
+| Value          | Systemd behaviour                                                                     | Dashy-started behaviour                                                 | When to use                                                                       |
+| -------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `"no"`         | **Recommended default.** systemd never auto-restarts.                                 | dashy never auto-restarts.                                              | Dev services, anything dashy fully controls.                                      |
+| `"on-failure"` | Restarts on crash (non-zero exit). Respects `systemctl stop`.                         | dashy restarts when status transitions `running → error`.               | Services that should survive crashes but stay stopped when intentionally stopped. |
+| `"always"`     | Restarts after any exit including clean stop. **Stop button will not work reliably.** | dashy restarts on any unexpected stop (`running → stopped` or `error`). | Use with care; avoid for dev services.                                            |
 
 The policy can always be toggled at runtime from the dashboard toggle button (cycles
 `always → on-failure → never`). For systemd services the change is written to disk;

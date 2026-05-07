@@ -4,9 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=agent
+User=ubuntu
 WorkingDirectory=/home/ubuntu/server/dashy
 ExecStart=python3 /home/ubuntu/server/dashy/server.py
+KillMode=process
 Restart=on-failure
 RestartSec=5
 
